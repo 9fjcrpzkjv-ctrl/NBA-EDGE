@@ -155,7 +155,7 @@ function buildOne(seed, usedSet){
    if(costs.length<n)return false;
    mins.push(...costs.slice(0,n));
   }
-  const ranked=chosenCandidates.map(p=>{const v=proj(p),value=v/(p.Price/1000),noise=(Math.random()-.5)*($('objective').value==='upside'?.65:.25),penalty=usedSet.has(String(p.ID))?.18:0;return {p,rank:v+value*2+noise*v-penalty*v};}).sort((a,b)=>a.p.Price-b.p.Price||b.rank-a.rank);
+  const ranked=chosenCandidates.map(p=>{const v=proj(p),value=v/(p.Price/1000),noise=(Math.random()-.5)*($('objective').value==='upside'?.65:.25),penalty=usedSet.has(String(p.ID))?.18:0;return {p,rank:v+value*2+noise*v-penalty*v};}).sort((a,b)=>b.rank-a.rank||b.p.Price-a.p.Price);
   // Start with affordable players to guarantee a feasible construction before optimising later.
   const head=ranked;
   for(const item of head){
