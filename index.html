@@ -37,6 +37,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 <div class="notice">Your CSV currently contains Fantasy Insider projections, not historical game logs. NBA Edge will not pretend those are independent projections. Add the optional historical columns shown below to activate our own model.</div>
 <div style="margin:12px 0"><label>Upload NBA historical game logs CSV (one row per player per game)</label><input id="logsfile" type="file" accept=".csv,text/csv"></div>
 <div style="margin:10px 0"><button id="testdata" type="button">Test free NBA data connection</button><p class="small" id="datamsg">This checks whether the free ESPN scoreboard feed is reachable. It does not change your lineups.</p></div>
+<div style="margin:10px 0"><button id="historydata" type="button">Retrieve recent NBA game logs</button><p class="small" id="historymsg">Checks completed NBA games from the previous day and attempts to read player box scores. It will not change the active projection mode.</p></div>
 <p class="small">Expected columns: PLAYER_NAME or Name, GAME_DATE or Date, MIN, PTS, FGM, FGA, FTM, FTA, FG3M, REB, AST, STL, BLK, TOV. The app calculates Draftstars fantasy points from each box score, then blends last 10 games, season average and recent-vs-season minutes. Player names are matched to your Draftstars pool.</p>
 <div class="row"><div><label>Projection mode</label><select id="mode"><option value="benchmark">Fantasy Insider benchmark (current CSV)</option><option value="edge">NBA Edge independent (requires historical columns)</option></select></div><div><label>Contest objective</label><select id="objective"><option value="upside">Tournament upside</option><option value="balanced">Balanced</option></select></div></div>
 <p class="small" id="modelmsg">Benchmark mode is active. Independent mode becomes available when historical inputs are present.</p>
@@ -192,6 +193,42 @@ function parseCSV(text){
 }
 async function readTextFile(file){if(file.text)return await file.text();return await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error||new Error('File read failed'));reader.readAsText(file);});}
 $('testdata').addEventListener('click',async()=>{const b=$('testdata'),m=$('datamsg');b.disabled=true;m.textContent='Checking free NBA data feed…';try{const r=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard');if(!r.ok)throw new Error('Feed returned HTTP '+r.status);const d=await r.json();const events=Array.isArray(d.events)?d.events:[];m.textContent=`Connection successful. ESPN returned ${events.length} NBA games on its current scoreboard. This confirms schedule access only; player game-log retrieval is the next test.`;}catch(e){m.textContent='Free data feed could not be reached from this browser: '+(e.message||'unknown error')+'. Existing lineup generation is unchanged.';}finally{b.disabled=false;}});
+$('historydata').addEventListener('click',async()=>{
+ const b=$('historydata'),m=$('historymsg');b.disabled=true;m.textContent='Checking yesterday’s completed NBA games…';
+ try{
+  const d=new Date();d.setDate(d.getDate()-1);const day=d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+  const sb=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates='+day);
+  if(!sb.ok)throw new Error('Scoreboard returned HTTP '+sb.status);
+  const board=await sb.json(),events=(board.events||[]).filter(e=>e.status?.type?.completed);
+  if(!events.length){m.textContent='No completed NBA games found for yesterday ('+day+'). Try again after games finish. Your current projections and lineups are unchanged.';return;}
+  let rows=[],checked=0,errors=0;
+  for(const ev of events){
+   try{
+    const res=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event='+encodeURIComponent(ev.id));
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const data=await res.json(),groups=data.boxscore?.players||[];
+    for(const group of groups){
+     const statGroup=(group.statistics||[])[0]||{},labels=statGroup.labels||[];
+     for(const a of statGroup.athletes||[]){
+      const vals=a.stats||[],obj={PLAYER_NAME:a.athlete?.displayName||a.athlete?.fullName||'',GAME_DATE:day};
+      labels.forEach((label,i)=>obj[String(label).toUpperCase()]=vals[i]??'');
+      const pair=(v)=>{const z=String(v||'0-0').split('-').map(Number);return [z[0]||0,z[1]||0]};
+      const [fgm,fga]=pair(obj.FG),[fg3m,fg3a]=pair(obj['3PT']),[ftm,fta]=pair(obj.FT);
+      const min=String(obj.MIN||'0');obj.MIN=min.includes(':')?(Number(min.split(':')[0])+(Number(min.split(':')[1])||0)/60):Number(min)||0;
+      Object.assign(obj,{PTS:Number(obj.PTS)||0,FGM:fgm,FGA:fga,FTM:ftm,FTA:fta,FG3M:fg3m,REB:Number(obj.REB)||0,AST:Number(obj.AST)||0,STL:Number(obj.STL)||0,BLK:Number(obj.BLK)||0,TOV:Number(obj.TO)||0});
+      if(obj.PLAYER_NAME&&obj.MIN>0)rows.push(obj);
+     }
+    }
+    checked++;
+   }catch(err){errors++;}
+  }
+  if(!rows.length){m.textContent='Found '+events.length+' completed games, but could not read player box-score rows. ESPN may have changed its response format. No projections were changed.';return;}
+  gameLogs=rows;calcLogs(gameLogs);
+  m.textContent='Retrieved '+rows.length+' player game-log rows from '+checked+' completed games ('+errors+' game summaries unavailable). '+$('matched').textContent+' players matched to your uploaded slate. Select NBA Edge independent mode to use these preliminary historical projections. One day of data is not enough for a reliable model; next we will build a rolling history.';
+  render();
+ }catch(err){m.textContent='Could not retrieve game logs: '+(err.message||'unknown error')+'. Existing lineups are unchanged.';}
+ finally{b.disabled=false;}
+});
 $('logsfile').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('modelmsg').textContent=`Reading ${f.name}…`;try{gameLogs=parseCSV(await readTextFile(f));calcLogs(gameLogs);$('modelmsg').textContent=`Loaded ${gameLogs.length} game-log rows.`;render();}catch(err){$('modelmsg').textContent=err.message||'Could not read game logs CSV.';alert($('modelmsg').textContent);}});
 $('file').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('loadmsg').textContent=`Reading ${f.name}…`;try{const imported=parseCSV(await readTextFile(f));if(imported.length===0)throw new Error('No player rows found. Make sure this is the Draftstars Player CSV, not an Excel workbook or PDF.');players=imported;generated=[];$('lineups').innerHTML='';$('loadmsg').textContent=`Successfully loaded ${players.length} players from ${f.name}.`;render()}catch(err){$('loadmsg').textContent=err.message||'Could not read that CSV.';alert($('loadmsg').textContent);}});
 ['search','status','mode'].forEach(id=>$(id).addEventListener('input',render));
