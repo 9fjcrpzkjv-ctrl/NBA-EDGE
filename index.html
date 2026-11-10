@@ -111,9 +111,8 @@ function calcLogs(rows){
  }
  players.forEach(p=>{p._edge=logSummary[alias(p.Name)]||null;});
  const matched=players.filter(p=>p._edge&&eligible(p)).length;
- $('matched').textContent=matched;$('logrows').textContent=rows.length;
- $('coverage').textContent=(players.filter(eligible).length?Math.round(100*matched/players.filter(eligible).length):0)+'%';
- $('modelmsg').textContent=`Independent model calculated for ${matched} eligible players. Formula: 50% last 10 + 30% season + 15% minutes-adjusted + 5% neutral matchup baseline.`;
+ const coverage=players.filter(eligible).length?Math.round(100*matched/players.filter(eligible).length):0;
+ const modelMessage=$('modelmsg');if(modelMessage)modelMessage.textContent=`Independent model calculated for ${matched} eligible players (${coverage}% coverage) from ${rows.length} game-log rows. Formula: 50% last 10 + 30% season + 15% minutes-adjusted + 5% neutral matchup baseline.`;
 }
 
 function unavailable(p){const s=String(p.Status||'').toUpperCase();return /\b(QUESTIONABLE|DOUBTFUL|OUT)\b/.test(s)}
@@ -225,7 +224,7 @@ $('historydata').addEventListener('click',async()=>{
   }
   if(!rows.length){m.textContent='Found '+events.length+' completed games, but could not read player box-score rows. ESPN may have changed its response format. No projections were changed.';return;}
   gameLogs=rows;calcLogs(gameLogs);
-  m.textContent='Retrieved '+rows.length+' player game-log rows from '+checked+' completed games across '+checkedDates.length+' dates ('+errors+' game summaries unavailable). '+$('matched').textContent+' players matched to your uploaded slate. Select NBA Edge independent mode to use these preliminary historical projections. One day of data is not enough for a reliable model; next we will build a rolling history.';
+  m.textContent='Retrieved '+rows.length+' player game-log rows from '+checked+' completed games across '+checkedDates.length+' dates ('+errors+' game summaries unavailable). '+players.filter(p=>p._edge&&eligible(p)).length+' players matched to your uploaded slate. Select NBA Edge independent mode to use these preliminary historical projections. One day of data is not enough for a reliable model; next we will build a rolling history.';
   render();
  }catch(err){m.textContent='Could not retrieve game logs: '+(err.message||'unknown error')+'. Existing lineups are unchanged.';}
  finally{b.disabled=false;}
