@@ -174,6 +174,7 @@ function generate(){
  if($('mode').value==='edge'&&!players.some(p=>p._edge)){alert('Upload historical player game logs first. The current Draftstars CSV contains projections, not box-score history.');return}
  generated=[];let exposure=new Set(),tries=0,n=Number($('count').value);
  while(generated.length<n&&tries<n*150){tries++;let l=buildOne(tries,exposure);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(generated.some(x=>x.key===key))continue;l.key=key;generated.push(l);l.players.forEach(p=>exposure.add(String(p.ID)))}
+ generated.sort((a,b)=>b.score-a.score);
  $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Lineup 1 is the suggested live-entry candidate; the rest are virtual comparisons.`:`No valid lineup found. Eligible players: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check the salary cap and position eligibility, or try Benchmark mode.`;
  $('lineups').innerHTML=generated.map((l,i)=>`<div class="lineup"><div class="lineuphead"><b>${i===0?'⭐ Suggested $15 entry':'Virtual lineup '+(i+1)}</b><span class="badge">${l.score.toFixed(1)} proj.</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} <span class="pill">${p.Position}${p.Position2?'/'+p.Position2:''}</span></span><span>$${p.Price.toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<div class="small" style="margin-top:8px">Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${((num($('cap').value)||100000)-l.salary).toLocaleString('en-AU')}</div></div>`).join('');
 }
