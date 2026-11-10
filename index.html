@@ -136,7 +136,7 @@ function buildOne(seed, usedSet){
  const pool=players.filter(p=>eligible(p)&&proj(p)!==null&&Number.isFinite(p.Price)&&p.Price>0);
  const picked=[],used=new Set();let nodes=0,bestPlayers=null,bestObjective=-Infinity,bestSalary=0;
  function search(remaining,spent,rawScore,objectiveScore){
-  if(++nodes>250000)return;
+  if(++nodes>5000)return;
   if(Object.values(remaining).every(v=>v===0)){
    if(objectiveScore>bestObjective){bestObjective=objectiveScore;bestPlayers=[...picked];bestSalary=spent;}
    return;
