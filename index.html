@@ -62,7 +62,7 @@ const initial=[{"ID": 7000801, "Name": "Kawhi Leonard", "Team": "TOR", "Opponent
 let players=initial, generated=[];
 const $=id=>document.getElementById(id);
 function num(x){if(typeof x==='string'&&/^\d{1,2}:\d{2}(\.\d+)?$/.test(x.trim())){let [m,sec]=x.trim().split(':');return Number(m)+Number(sec)/60}let n=Number(x);return Number.isFinite(n)?n:0}
-function norm(p){return {...p,Price:num(p.Price),Projection:num(p.Projection),Status:String(p.Status||'').trim(),Position:String(p.Position||'').trim(),Position2:String(p.Position2||'').trim()}}
+function norm(p){const status=String(p.Status||'').trim().toUpperCase().replace(/[^A-Z]+/g,' ').trim();return {...p,Price:num(p.Price),Projection:num(p.Projection),Status:status,Position:String(p.Position||'').trim().toUpperCase(),Position2:String(p.Position2||'').trim().toUpperCase()}}
 
 players=players.map(norm);
 let gameLogs=[], logSummary={};
@@ -114,7 +114,8 @@ function calcLogs(rows){
  $('modelmsg').textContent=`Independent model calculated for ${matched} eligible players. Formula: 50% last 10 + 30% season + 15% minutes-adjusted + 5% neutral matchup baseline.`;
 }
 
-function eligible(p){return p.Status!=='OUT OF GAME' && p.Status!=='QUESTIONABLE TO PLAY' && p.Projection>0}
+function unavailable(p){const s=String(p.Status||'').toUpperCase();return /\\b(QUESTIONABLE|DOUBTFUL|OUT)\\b/.test(s)}
+function eligible(p){return !unavailable(p)&&p.Projection>0}
 function proj(p){
  if($('mode').value==='edge')return p._edge?p._edge.projection:null;
  return p.Projection;
@@ -180,7 +181,8 @@ function generate(){
  generated=[];let exposure=new Set(),tries=0,n=Number($('count').value);
  while(generated.length<n&&tries<n*150){tries++;let l=buildOne(tries,exposure);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(generated.some(x=>x.key===key))continue;l.key=key;generated.push(l);l.players.forEach(p=>exposure.add(String(p.ID)))}
  generated.sort((a,b)=>b.score-a.score);
- $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Lineup 1 is the suggested live-entry candidate; the rest are virtual comparisons.`:`No valid lineup found. Eligible players: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check the salary cap and position eligibility, or try Benchmark mode.`;
+ const blocked=players.filter(unavailable).length;
+ $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Excluded ${blocked} questionable, doubtful or out players. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found. Eligible players: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check the salary cap and position eligibility, or try Benchmark mode.`;
  $('lineups').innerHTML=generated.map((l,i)=>`<div class="lineup"><div class="lineuphead"><b>${i===0?'⭐ Suggested $15 entry':'Virtual lineup '+(i+1)}</b><span class="badge">${l.score.toFixed(1)} proj.</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} <span class="pill">${p.Position}${p.Position2?'/'+p.Position2:''}</span></span><span>$${p.Price.toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<div class="small" style="margin-top:8px">Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${((num($('cap').value)||100000)-l.salary).toLocaleString('en-AU')}</div></div>`).join('');
 }
 function parseCSV(text){
