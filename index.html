@@ -196,11 +196,10 @@ $('testdata').addEventListener('click',async()=>{const b=$('testdata'),m=$('data
 $('historydata').addEventListener('click',async()=>{
  const b=$('historydata'),m=$('historymsg');b.disabled=true;m.textContent='Checking yesterday’s completed NBA games…';
  try{
-  const d=new Date();d.setDate(d.getDate()-1);const day=d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
-  const sb=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates='+day);
-  if(!sb.ok)throw new Error('Scoreboard returned HTTP '+sb.status);
-  const board=await sb.json(),events=(board.events||[]).filter(e=>e.status?.type?.completed);
-  if(!events.length){m.textContent='No completed NBA games found for yesterday ('+day+'). Try again after games finish. Your current projections and lineups are unchanged.';return;}
+  const dates=[];for(let offset=1;offset<=7;offset++){const d=new Date();d.setDate(d.getDate()-offset);dates.push(d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0'));}
+  let events=[],checkedDates=[];for(const day of dates){const sb=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates='+day);if(!sb.ok)throw new Error('Scoreboard returned HTTP '+sb.status+' for '+day);const board=await sb.json();const found=(board.events||[]).filter(e=>e.status?.type?.completed);if(found.length){events.push(...found);checkedDates.push(day);}}
+  const uniqueEvents=[...new Map(events.map(e=>[e.id,e])).values()];events=uniqueEvents;
+  if(!events.length){m.textContent='No completed NBA games found in the previous 7 calendar days. The free feed may be between seasons or the requested dates may not be available. Your current projections and lineups are unchanged.';return;}
   let rows=[],checked=0,errors=0;
   for(const ev of events){
    try{
@@ -224,7 +223,7 @@ $('historydata').addEventListener('click',async()=>{
   }
   if(!rows.length){m.textContent='Found '+events.length+' completed games, but could not read player box-score rows. ESPN may have changed its response format. No projections were changed.';return;}
   gameLogs=rows;calcLogs(gameLogs);
-  m.textContent='Retrieved '+rows.length+' player game-log rows from '+checked+' completed games ('+errors+' game summaries unavailable). '+$('matched').textContent+' players matched to your uploaded slate. Select NBA Edge independent mode to use these preliminary historical projections. One day of data is not enough for a reliable model; next we will build a rolling history.';
+  m.textContent='Retrieved '+rows.length+' player game-log rows from '+checked+' completed games across '+checkedDates.length+' dates ('+errors+' game summaries unavailable). '+$('matched').textContent+' players matched to your uploaded slate. Select NBA Edge independent mode to use these preliminary historical projections. One day of data is not enough for a reliable model; next we will build a rolling history.';
   render();
  }catch(err){m.textContent='Could not retrieve game logs: '+(err.message||'unknown error')+'. Existing lineups are unchanged.';}
  finally{b.disabled=false;}
