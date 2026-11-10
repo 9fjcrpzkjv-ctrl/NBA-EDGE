@@ -134,39 +134,46 @@ function buildOne(seed, usedSet){
  const required={PG:2,SG:2,SF:2,PF:2,C:1};
  const cap=num($('cap').value)||100000;
  const pool=players.filter(p=>eligible(p)&&proj(p)!==null&&Number.isFinite(p.Price)&&p.Price>0);
- const picked=[],used=new Set();let nodes=0;
- function search(remaining,spent){
-  if(Object.values(remaining).every(v=>v===0))return true;
-  if(++nodes>3500)return false;
-  const slotsLeft=Object.values(remaining).reduce((a,b)=>a+b,0);
-  const available=pool.filter(p=>!used.has(String(p.ID)));
-  const cheapest=available.map(p=>p.Price).sort((a,b)=>a-b);
-  if(cheapest.length<slotsLeft||spent+cheapest.slice(0,slotsLeft).reduce((a,b)=>a+b,0)>cap)return false;
-  let chosen=null,chosenCandidates=null;
-  for(const pos of Object.keys(remaining)){
-   if(!remaining[pos])continue;
-   const candidates=available.filter(p=>can(p,pos)&&spent+p.Price<=cap);
-   if(!chosenCandidates||candidates.length<chosenCandidates.length){chosen=pos;chosenCandidates=candidates;}
+ const width=600;
+ let beam=[{remaining:required,spent:0,score:0,rank:0,picked:[],used:new Set()}];
+ for(let depth=0;depth<9;depth++){
+  const next=[];
+  for(const state of beam){
+   const slotsLeft=Object.values(state.remaining).reduce((a,b)=>a+b,0);
+   const available=pool.filter(p=>!state.used.has(String(p.ID)));
+   if(available.length<slotsLeft)continue;
+   const cheapest=available.map(p=>p.Price).sort((a,b)=>a-b);
+   if(state.spent+cheapest.slice(0,slotsLeft).reduce((a,b)=>a+b,0)>cap)continue;
+   let chosen=null,candidates=null;
+   for(const pos of Object.keys(state.remaining)){
+    if(!state.remaining[pos])continue;
+    const list=available.filter(p=>can(p,pos)&&state.spent+p.Price<=cap);
+    if(!candidates||list.length<candidates.length){chosen=pos;candidates=list;}
+   }
+   if(!candidates||!candidates.length)continue;
+   for(const p of candidates){
+    const id=String(p.ID),v=proj(p),remaining={...state.remaining};
+    remaining[chosen]--;
+    const used=new Set(state.used);used.add(id);
+    const score=state.score+v;
+    const rank=score-(usedSet.has(id)?.15*v:0);
+    next.push({remaining,spent:state.spent+p.Price,score,rank,picked:[...state.picked,p],used});
+   }
   }
-  if(!chosenCandidates||chosenCandidates.length<remaining[chosen])return false;
-  const ranked=chosenCandidates.map(p=>{
-   const v=proj(p),value=v/(p.Price/1000);
-   const noise=(Math.random()-.5)*($('objective').value==='upside'?.35:.12);
-   const repeatPenalty=usedSet.has(String(p.ID))?.15*v:0;
-   return {p,rank:v+value*1.5+noise*v-repeatPenalty};
-  }).sort((a,b)=>b.rank-a.rank);
-  for(const item of ranked){
-   const p=item.p,id=String(p.ID);if(used.has(id))continue;
-   const next={...remaining};next[chosen]--;
-   used.add(id);picked.push(p);
-   if(search(next,spent+p.Price))return true;
-   picked.pop();used.delete(id);
+  if(!next.length)return null;
+  next.sort((a,b)=>b.rank-a.rank||b.score-a.score);
+  const seen=new Set(),pruned=[];
+  for(const state of next){
+   const key=state.picked.map(p=>String(p.ID)).sort().join('|');
+   if(seen.has(key))continue;
+   seen.add(key);pruned.push(state);
+   if(pruned.length>=width)break;
   }
-  return false;
+  beam=pruned;
  }
- if(!search(required,0))return null;
- const salary=picked.reduce((a,p)=>a+p.Price,0);
- return {players:[...picked],salary,score:picked.reduce((a,p)=>a+proj(p),0)};
+ const best=beam.filter(s=>Object.values(s.remaining).every(v=>v===0)).sort((a,b)=>b.score-a.score)[0];
+ if(!best)return null;
+ return {players:best.picked,salary:best.spent,score:best.score};
 }
 function generate(){
  if($('mode').value==='edge'&&!players.some(p=>p._edge)){alert('Upload historical player game logs first. The current Draftstars CSV contains projections, not box-score history.');return}
