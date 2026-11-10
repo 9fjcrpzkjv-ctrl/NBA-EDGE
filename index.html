@@ -95,26 +95,26 @@ function calcLogs(rows){
   if(mins<=0)continue;
   const date=String(field(g,['GAME_DATE','Date','date'])||'');
   const fantasy=dsFantasy(g);
-  (grouped[key]??=[]).push({date,mins,fantasy});
+  (grouped[key]??=[]).push({date,mins,fantasy,fppm:fantasy/mins});
  }
  logSummary={};
  for(const [key,arr] of Object.entries(grouped)){
   arr.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
-  const last=arr.slice(0,10),season=arr;
-  const avg=a=>a.reduce((s,x)=>s+x.fantasy,0)/a.length;
-  const avgMin=a=>a.reduce((s,x)=>s+x.mins,0)/a.length;
-  const l10=avg(last),savg=avg(season),recentMin=avgMin(last),seasonMin=avgMin(season);
-  const minAdj=seasonMin>0?savg*(recentMin/seasonMin):savg;
-  // Neutral matchup component until opponent defensive data is supplied.
-  const projection=.50*l10+.30*savg+.15*minAdj+.05*savg;
-  logSummary[key]={games:arr.length,last10:l10,season:savg,recentMin,seasonMin,projection};
+  const last5=arr.slice(0,5),last10=arr.slice(0,10),sample=arr;
+  const avg=(a,k)=>a.length?a.reduce((sum,x)=>sum+x[k],0)/a.length:0;
+  const fppm5=avg(last5,'fppm'),fppm10=avg(last10,'fppm'),fppmSample=avg(sample,'fppm');
+  const recentMinutes=avg(last5,'mins'),sampleMinutes=avg(sample,'mins');
+  // Blend recent, medium-term and full retrieved sample rates; shrink toward sample when history is short.
+  const fppm=.50*fppm5+.30*fppm10+.20*fppmSample;
+  const projectedMinutes=.70*recentMinutes+.30*sampleMinutes;
+  const projection=fppm*projectedMinutes;
+  logSummary[key]={games:arr.length,last5:avg(last5,'fantasy'),last10:avg(last10,'fantasy'),sampleAvg:avg(sample,'fantasy'),fppm,recentMinutes,sampleMinutes,projectedMinutes,projection};
  }
  players.forEach(p=>{p._edge=logSummary[alias(p.Name)]||null;});
  const matched=players.filter(p=>p._edge&&eligible(p)).length;
  const coverage=players.filter(eligible).length?Math.round(100*matched/players.filter(eligible).length):0;
- const modelMessage=$('modelmsg');if(modelMessage)modelMessage.textContent=`Independent model calculated for ${matched} eligible players (${coverage}% coverage) from ${rows.length} game-log rows. Formula: 50% last 10 + 30% season + 15% minutes-adjusted + 5% neutral matchup baseline.`;
+ const modelMessage=$('modelmsg');if(modelMessage)modelMessage.textContent=`Preliminary rolling model calculated for ${matched} eligible players (${coverage}% coverage) from ${rows.length} game-log rows. Projection = blended fantasy points/minute (last 5, last 10 and retrieved sample) × estimated minutes (70% last 5, 30% sample). Current feed covers only 6 dates, not a full season; treat these as experimental estimates.`;
 }
-
 function unavailable(p){const s=String(p.Status||'').toUpperCase();return /\b(QUESTIONABLE|DOUBTFUL|OUT)\b/.test(s)}
 function eligible(p){return !unavailable(p)&&p.Projection>0}
 function proj(p){
