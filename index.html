@@ -157,7 +157,7 @@ function buildOne(seed, usedSet){
     remaining[chosen]--;
     const used=new Set(state.used);used.add(id);
     const score=state.score+v;
-    const rank=score-(usedSet.has(id)?.15*v:0);
+    const exposureCount=usedSet.get(id)||0;const rank=score-(exposureCount*v*.18);
     next.push({remaining,spent:state.spent+p.Price,score,rank,picked:[...state.picked,p],used});
    }
   }
@@ -178,8 +178,8 @@ function buildOne(seed, usedSet){
 }
 function generate(){
  if($('mode').value==='edge'&&!players.some(p=>p._edge)){alert('Upload historical player game logs first. The current Draftstars CSV contains projections, not box-score history.');return}
- generated=[];let exposure=new Set(),tries=0,n=Number($('count').value);
- while(generated.length<n&&tries<n*150){tries++;let l=buildOne(tries,exposure);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(generated.some(x=>x.key===key))continue;l.key=key;generated.push(l);l.players.forEach(p=>exposure.add(String(p.ID)))}
+ generated=[];let exposure=new Map(),tries=0,n=Number($('count').value);
+ while(generated.length<n&&tries<n*150){tries++;let l=buildOne(tries,exposure);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(generated.some(x=>x.key===key))continue;l.key=key;generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
  generated.sort((a,b)=>b.score-a.score);
  const blocked=players.filter(unavailable).length;
  $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Excluded ${blocked} questionable, doubtful or out players. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found. Eligible players: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check the salary cap and position eligibility, or try Benchmark mode.`;
