@@ -114,7 +114,7 @@ function calcLogs(rows){
  $('modelmsg').textContent=`Independent model calculated for ${matched} eligible players. Formula: 50% last 10 + 30% season + 15% minutes-adjusted + 5% neutral matchup baseline.`;
 }
 
-function unavailable(p){const s=String(p.Status||'').toUpperCase();return /\\b(QUESTIONABLE|DOUBTFUL|OUT)\\b/.test(s)}
+function unavailable(p){const s=String(p.Status||'').toUpperCase();return /\b(QUESTIONABLE|DOUBTFUL|OUT)\b/.test(s)}
 function eligible(p){return !unavailable(p)&&p.Projection>0}
 function proj(p){
  if($('mode').value==='edge')return p._edge?p._edge.projection:null;
