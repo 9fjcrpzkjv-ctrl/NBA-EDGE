@@ -157,7 +157,7 @@ function buildOne(seed, usedSet){
     remaining[chosen]--;
     const used=new Set(state.used);used.add(id);
     const score=state.score+v;
-    const exposureCount=usedSet.get(id)||0;const rank=score-(exposureCount*v*.18);
+    const exposureCount=usedSet.get(id)||0;const rank=state.rank+v-(exposureCount*v*.25);
     next.push({remaining,spent:state.spent+p.Price,score,rank,picked:[...state.picked,p],used});
    }
   }
@@ -172,7 +172,7 @@ function buildOne(seed, usedSet){
   }
   beam=pruned;
  }
- const best=beam.filter(s=>Object.values(s.remaining).every(v=>v===0)).sort((a,b)=>b.score-a.score)[0];
+ const best=beam.filter(s=>Object.values(s.remaining).every(v=>v===0)).sort((a,b)=>b.rank-a.rank||b.score-a.score)[0];
  if(!best)return null;
  return {players:best.picked,salary:best.spent,score:best.score};
 }
