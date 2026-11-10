@@ -62,7 +62,7 @@ const initial=[{"ID": 7000801, "Name": "Kawhi Leonard", "Team": "TOR", "Opponent
 let players=initial, generated=[];
 const $=id=>document.getElementById(id);
 function num(x){if(typeof x==='string'&&/^\d{1,2}:\d{2}(\.\d+)?$/.test(x.trim())){let [m,sec]=x.trim().split(':');return Number(m)+Number(sec)/60}let n=Number(x);return Number.isFinite(n)?n:0}
-function norm(p){const status=String(p.Status||'').trim().toUpperCase().replace(/[^A-Z]+/g,' ').trim();return {...p,Price:num(p.Price),Projection:num(p.Projection),Status:status,Position:String(p.Position||'').trim().toUpperCase(),Position2:String(p.Position2||'').trim().toUpperCase()}}
+function norm(p){const status=String(p.Status||'').trim().toUpperCase().replace(/[^A-Z]+/g,' ').trim();const name=String(p.Name||p.Player||'').trim();const team=String(p.Team||'').trim().toUpperCase();const rawId=String(p.ID??p.Id??p.id??'').trim();const id=rawId||`${name.toLowerCase()}|${team}`;return {...p,ID:id,Name:name,Team:team,Price:num(p.Price),Projection:num(p.Projection),Status:status,Position:String(p.Position||'').trim().toUpperCase(),Position2:String(p.Position2||'').trim().toUpperCase()}}
 
 players=players.map(norm);
 let gameLogs=[], logSummary={};
