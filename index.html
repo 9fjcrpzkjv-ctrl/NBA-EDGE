@@ -67,7 +67,7 @@ function num(x){if(typeof x==='string'&&/^\d{1,2}:\d{2}(\.\d+)?$/.test(x.trim())
 function norm(p){const status=String(p.Status||'').trim().toUpperCase().replace(/[^A-Z]+/g,' ').trim();const name=String(p.Name||p.Player||'').trim();const team=String(p.Team||'').trim().toUpperCase();const rawId=String(p.ID??p.Id??p.id??'').trim();const id=rawId||`${name.toLowerCase()}|${team}`;return {...p,ID:id,Name:name,Team:team,Price:num(p.Price),Projection:num(p.Projection),Status:status,Position:String(p.Position||'').trim().toUpperCase(),Position2:String(p.Position2||'').trim().toUpperCase()}}
 
 players=players.map(norm);
-let gameLogs=[], logSummary={};
+let gameLogs=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeGameLogs')||'[]')}catch(e){return []}})(), logSummary={};
 const alias=x=>String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
 function field(o,names){for(const n of names){if(o[n]!==undefined&&o[n]!==''&&o[n]!==null)return o[n];}return 0;}
 function dsFantasy(g){
@@ -113,7 +113,7 @@ function calcLogs(rows){
  players.forEach(p=>{p._edge=logSummary[alias(p.Name)]||null;});
  const matched=players.filter(p=>p._edge&&eligible(p)).length;
  const coverage=players.filter(eligible).length?Math.round(100*matched/players.filter(eligible).length):0;
- const modelMessage=$('modelmsg');if(modelMessage)modelMessage.textContent=`Preliminary rolling model calculated for ${matched} eligible players (${coverage}% coverage) from ${rows.length} game-log rows. Projection = blended fantasy points/minute (last 5, last 10 and retrieved sample) × estimated minutes (70% last 5, 30% sample). Current feed covers only 6 dates, not a full season; treat these as experimental estimates.`;
+ const modelMessage=$('modelmsg');if(modelMessage)modelMessage.textContent=`Preliminary rolling model calculated for ${matched} eligible players (${coverage}% coverage) from ${rows.length} game-log rows. Projection = blended fantasy points/minute (last 5, last 10 and retrieved sample) × estimated minutes (70% last 5, 30% sample). Saved history is retained on this device; current feed covers up to 30 days, not a full season, so treat these as experimental estimates.`;
 }
 function unavailable(p){const s=String(p.Status||'').toUpperCase();return /\b(QUESTIONABLE|DOUBTFUL|OUT)\b/.test(s)}
 function eligible(p){return !unavailable(p)&&p.Projection>0}
@@ -223,16 +223,17 @@ $('historydata').addEventListener('click',async()=>{
    }catch(err){errors++;}
   }
   if(!rows.length){m.textContent='Found '+events.length+' completed games, but could not read player box-score rows. ESPN may have changed its response format. No projections were changed.';return;}
-  gameLogs=rows;calcLogs(gameLogs);
+  gameLogs=rows;try{localStorage.setItem('nbaEdgeGameLogs',JSON.stringify(gameLogs));}catch(e){m.textContent='History retrieved but could not be saved on this device (browser storage may be full).';}calcLogs(gameLogs);
   m.textContent='Retrieved '+rows.length+' player game-log rows from '+checked+' completed games across '+checkedDates.length+' dates (30-day search, up to 150 games) ('+errors+' game summaries unavailable). '+players.filter(p=>p._edge&&eligible(p)).length+' players matched to your uploaded slate. Select NBA Edge independent mode to use these preliminary historical projections. One day of data is not enough for a reliable model; next we will build a rolling history.';
   render();
  }catch(err){m.textContent='Could not retrieve game logs: '+(err.message||'unknown error')+'. Existing lineups are unchanged.';}
  finally{b.disabled=false;}
 });
-$('logsfile').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('modelmsg').textContent=`Reading ${f.name}…`;try{gameLogs=parseCSV(await readTextFile(f));calcLogs(gameLogs);$('modelmsg').textContent=`Loaded ${gameLogs.length} game-log rows.`;render();}catch(err){$('modelmsg').textContent=err.message||'Could not read game logs CSV.';alert($('modelmsg').textContent);}});
+$('logsfile').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('modelmsg').textContent=`Reading ${f.name}…`;try{gameLogs=parseCSV(await readTextFile(f));try{localStorage.setItem('nbaEdgeGameLogs',JSON.stringify(gameLogs));}catch(e){}calcLogs(gameLogs);$('modelmsg').textContent=`Loaded ${gameLogs.length} game-log rows.`;render();}catch(err){$('modelmsg').textContent=err.message||'Could not read game logs CSV.';alert($('modelmsg').textContent);}});
 $('file').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('loadmsg').textContent=`Reading ${f.name}…`;try{const imported=parseCSV(await readTextFile(f));if(imported.length===0)throw new Error('No player rows found. Make sure this is the Draftstars Player CSV, not an Excel workbook or PDF.');players=imported;generated=[];$('lineups').innerHTML='';$('loadmsg').textContent=`Successfully loaded ${players.length} players from ${f.name}.`;render()}catch(err){$('loadmsg').textContent=err.message||'Could not read that CSV.';alert($('loadmsg').textContent);}});
 ['search','status','mode'].forEach(id=>$(id).addEventListener('input',render));
 $('generate').addEventListener('click',generate);
 $('save').addEventListener('click',()=>{$('resultmsg').textContent=`Recorded: score ${$('actual').value||'not entered'}, rank ${$('rank').value||'not entered'}, prize $${$('prize').value||'0'}. Keep this record with your slate results.`});
-render();
+if(gameLogs.length)calcLogs(gameLogs);
+ render();
 </script></body></html>
