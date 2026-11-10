@@ -131,7 +131,7 @@ function render(){
 function slots(){return ['PG','PG','SG','SG','SF','SF','PF','PF','C']}
 function positions(p){return [p.Position,p.Position2].filter(Boolean)}
 function can(p,s){return positions(p).includes(s)}
-function buildOne(seed, usedSet){
+function buildOne(seed, usedSet, seenKeys){
  const required={PG:2,SG:2,SF:2,PF:2,C:1};
  const cap=num($('cap').value)||100000;
  const pool=players.filter(p=>eligible(p)&&proj(p)!==null&&Number.isFinite(p.Price)&&p.Price>0);
@@ -172,14 +172,14 @@ function buildOne(seed, usedSet){
   }
   beam=pruned;
  }
- const best=beam.filter(s=>Object.values(s.remaining).every(v=>v===0)).sort((a,b)=>b.rank-a.rank||b.score-a.score)[0];
+ const best=beam.filter(s=>Object.values(s.remaining).every(v=>v===0)&&!seenKeys.has(s.picked.map(p=>p.ID).sort().join('-'))).sort((a,b)=>b.score-a.score)[0];
  if(!best)return null;
  return {players:best.picked,salary:best.spent,score:best.score};
 }
 function generate(){
  if($('mode').value==='edge'&&!players.some(p=>p._edge)){alert('Upload historical player game logs first. The current Draftstars CSV contains projections, not box-score history.');return}
- generated=[];let exposure=new Map(),tries=0,n=Number($('count').value);
- while(generated.length<n&&tries<n*150){tries++;let l=buildOne(tries,exposure);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(generated.some(x=>x.key===key))continue;l.key=key;generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
+ generated=[];let exposure=new Map(),seenKeys=new Set(),tries=0,n=Number($('count').value);
+ while(generated.length<n&&tries<n*150){tries++;let l=buildOne(tries,exposure,seenKeys);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
  generated.sort((a,b)=>b.score-a.score);
  const blocked=players.filter(unavailable).length;
  $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Excluded ${blocked} questionable, doubtful or out players. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found. Eligible players: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check the salary cap and position eligibility, or try Benchmark mode.`;
