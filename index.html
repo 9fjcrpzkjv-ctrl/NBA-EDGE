@@ -134,41 +134,38 @@ function buildOne(seed, usedSet){
  const required={PG:2,SG:2,SF:2,PF:2,C:1};
  const cap=num($('cap').value)||100000;
  const pool=players.filter(p=>eligible(p)&&proj(p)!==null&&Number.isFinite(p.Price)&&p.Price>0);
- const picked=[],used=new Set();let nodes=0,bestPlayers=null,bestObjective=-Infinity,bestSalary=0;
- function search(remaining,spent,rawScore,objectiveScore){
-  if(++nodes>5000)return;
-  if(Object.values(remaining).every(v=>v===0)){
-   if(objectiveScore>bestObjective){bestObjective=objectiveScore;bestPlayers=[...picked];bestSalary=spent;}
-   return;
-  }
-  const slotsLeft=Object.values(remaining).reduce((a,b)=>a+b,0);
-  // Optimistic upper bound: highest remaining projections, ignoring position and salary constraints.
-  const optimistic=pool.filter(p=>!used.has(String(p.ID))).map(p=>proj(p)).sort((a,b)=>b-a).slice(0,slotsLeft).reduce((a,b)=>a+b,0);
-  if(optimistic.length<slotsLeft||objectiveScore+optimistic<=bestObjective)return;
-  let chosen=null,chosenCandidates=null;
+ const picked=[],used=new Set();let nodes=0;
+ function search(remaining,spent){
+  if(Object.values(remaining).every(v=>v===0))return true;
+  if(++nodes>250000)return false;
+  // Pick the remaining position with the fewest currently affordable candidates.
+  let chosen=null, chosenCandidates=null;
   for(const pos of Object.keys(remaining)){
    if(!remaining[pos])continue;
    const candidates=pool.filter(p=>!used.has(String(p.ID))&&can(p,pos)&&spent+p.Price<=cap);
    if(!chosenCandidates||candidates.length<chosenCandidates.length){chosen=pos;chosenCandidates=candidates;}
   }
-  if(!chosenCandidates||chosenCandidates.length<remaining[chosen])return;
+  if(!chosenCandidates||chosenCandidates.length<remaining[chosen])return false;
+  // A salary lower-bound check prevents branches that cannot possibly fit.
+  // Safe salary lower bound: even the cheapest remaining distinct players must fit.
+  const slotsLeft=Object.values(remaining).reduce((a,b)=>a+b,0);
   const cheapest=pool.filter(p=>!used.has(String(p.ID))).map(p=>p.Price).sort((a,b)=>a-b);
-  if(cheapest.length<slotsLeft||spent+cheapest.slice(0,slotsLeft).reduce((a,b)=>a+b,0)>cap)return;
-  const ranked=chosenCandidates.map(p=>{
-   const v=proj(p),exposurePenalty=usedSet.has(String(p.ID))?.18*v:0;
-   return {p,rank:v-exposurePenalty};
-  }).sort((a,b)=>b.rank-a.rank||b.p.Price-a.p.Price);
-  for(const item of ranked){
+  if(cheapest.length<slotsLeft||spent+cheapest.slice(0,slotsLeft).reduce((a,b)=>a+b,0)>cap)return false;
+  const ranked=chosenCandidates.map(p=>{const v=proj(p),value=v/(p.Price/1000),noise=(Math.random()-.5)*($('objective').value==='upside'?.65:.25),penalty=usedSet.has(String(p.ID))?.18:0;return {p,rank:v+value*2+noise*v-penalty*v};}).sort((a,b)=>b.rank-a.rank||b.p.Price-a.p.Price);
+  // Start with affordable players to guarantee a feasible construction before optimising later.
+  const head=ranked;
+  for(const item of head){
    const p=item.p,id=String(p.ID);if(used.has(id))continue;
    const next={...remaining};next[chosen]--;
    used.add(id);picked.push(p);
-   search(next,spent+p.Price,rawScore+proj(p),objectiveScore+proj(p)-(usedSet.has(id)?.18*proj(p):0));
+   if(search(next,spent+p.Price))return true;
    picked.pop();used.delete(id);
   }
+  return false;
  }
- search(required,0,0,0);
- if(!bestPlayers)return null;
- return {players:bestPlayers,salary:bestSalary,score:bestPlayers.reduce((a,p)=>a+proj(p),0)};
+ if(!search(required,0))return null;
+ const salary=picked.reduce((a,p)=>a+p.Price,0);
+ return {players:[...picked],salary,score:picked.reduce((a,p)=>a+proj(p),0)};
 }
 function generate(){
  if($('mode').value==='edge'&&!players.some(p=>p._edge)){alert('Upload historical player game logs first. The current Draftstars CSV contains projections, not box-score history.');return}
