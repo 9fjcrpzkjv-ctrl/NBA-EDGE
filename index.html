@@ -78,16 +78,52 @@ function render(){let list=players.filter(p=>(p.Name+' '+p.Team).toLowerCase().i
 $('csv').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;try{players=parseCSV(await readFileText(f));if(!players.length)throw Error('No player rows found. Check that this is the Draftstars CSV.');render();$('load').textContent=`Loaded ${players.length} players from ${f.name}.`;$('msg').textContent='Ready to generate.'}catch(err){$('load').textContent=err.message}});
 $('search').addEventListener('input',render);
 $('apply').onclick=()=>{let o=$('opp').value.trim().toUpperCase(),a=num($('adj').value);if(!o){$('matchmsg').textContent='Enter an opponent team first.';return}adjustments[o]=Math.max(-30,Math.min(30,a));$('matchmsg').textContent=`${o}: ${adjustments[o]>0?'+':''}${adjustments[o]}% projection adjustment applied.`;render()};
-function build(){const cap=num($('cap').value)||100000,slots=['PG','PG','SG','SG','SF','SF','PF','PF','C'],pool=players.filter(eligible);if(!pool.length)return null;
-let best=null,nodes=0,chosen=[],used=new Set(),strategy=$('strategy').value;
-const score=p=>{let v=proj(p),value=v/(num(p.Price)/1000),sd=num(p.SD);return strategy==='upside'?v+sd*.45:strategy==='value'?v+value*2:v};
-function dfs(left,salary){if(++nodes>300000)return;if(!left.length){let total=chosen.reduce((s,p)=>s+proj(p),0);if(!best||total>best.total)best={players:[...chosen],salary,total};return}
-if(best&&chosen.reduce((s,p)=>s+proj(p),0)+left.length*65<best.total)return;
-let pos=left.reduce((b,x)=>{let n=pool.filter(p=>!used.has(String(p.ID))&&positions(p).includes(x)&&salary+num(p.Price)<=cap).length;return !b||n<b.n?{pos:x,n}:b},null);if(!pos||!pos.n)return;
-let rest=left.slice();rest.splice(rest.indexOf(pos.pos),1);
-let candidates=pool.filter(p=>!used.has(String(p.ID))&&positions(p).includes(pos.pos)&&salary+num(p.Price)<=cap).sort((a,b)=>score(b)-score(a));
-for(let p of candidates){used.add(String(p.ID));chosen.push(p);dfs(rest,salary+num(p.Price));chosen.pop();used.delete(String(p.ID));if(nodes>300000)break}
+function build(){
+ const cap=num($('cap').value)||100000;
+ const required=['PG','PG','SG','SG','SF','SF','PF','PF','C'];
+ const pool=players.filter(eligible);
+ if(pool.length<9)return null;
+ const strategy=$('strategy').value;
+ const metric=p=>{
+  const v=proj(p),value=v/(num(p.Price)/1000),sd=num(p.SD);
+  return strategy==='upside'?v+sd*.45:strategy==='value'?v+value*2:v;
+ };
+ const pid=p=>String(p.ID||p.Name);
+ const counts={};
+ for(const pos of ['PG','SG','SF','PF','C'])counts[pos]=pool.filter(p=>positions(p).includes(pos)).length;
+ const slots=required.slice().sort((a,b)=>counts[a]-counts[b]);
+ // Beam search avoids the old recursive search exploding before it finds a valid roster.
+ let beam=[{picked:[],used:new Set(),salary:0,score:0,total:0}];
+ const WIDTH=2500;
+ for(let step=0;step<slots.length;step++){
+  const pos=slots[step],next=[];
+  for(const state of beam){
+   for(const p of pool){
+    const id=pid(p),price=num(p.Price);
+    if(state.used.has(id)||!positions(p).includes(pos)||state.salary+price>cap)continue;
+    const used=new Set(state.used);used.add(id);
+    next.push({
+     picked:state.picked.concat(p),used,
+     salary:state.salary+price,
+     score:state.score+metric(p),
+     total:state.total+proj(p)
+    });
+   }
+  }
+  if(!next.length)return null;
+  // Keep high-scoring states while slightly favouring salary flexibility.
+  next.sort((a,b)=>(b.score+(cap-b.salary)*0.0005)-(a.score+(cap-a.salary)*0.0005));
+  const seen=new Set();beam=[];
+  for(const state of next){
+   const key=state.picked.map(pid).sort().join('|');
+   if(seen.has(key))continue;
+   seen.add(key);beam.push(state);
+   if(beam.length>=WIDTH)break;
+  }
+ }
+ beam.sort((a,b)=>b.score-a.score);
+ const best=beam[0];
+ return best?{players:best.picked,salary:best.salary,total:best.total}:null;
 }
-dfs(slots,0);return best}
 $('go').onclick=()=>{if(!players.length){$('msg').textContent='Upload the Draftstars CSV first.';return}let count=Number($('count').value),out=[],seen=new Set();let original=players.slice();for(let i=0;i<count;i++){let l=build();if(!l)break;let key=l.players.map(p=>p.ID).sort().join('|');if(seen.has(key))break;seen.add(key);out.push(l);let worst=l.players.slice().sort((a,b)=>proj(a)-proj(b))[0];players=players.filter(p=>String(p.ID)!==String(worst.ID))}players=original;render();$('msg').textContent=out.length?`Generated ${out.length} valid lineup(s). Ranked by the selected strategy.`:'No valid lineup found. Check the CSV, positions and salary cap.';$('results').innerHTML=out.map((l,i)=>`<div class="lineup"><div><b>${i===0?'⭐ Best lineup':'Lineup '+(i+1)}</b> <span class="tag">${l.total.toFixed(1)} projected</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} · ${positions(p).join('/')}</span><span>$${num(p.Price).toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<p class="status">Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${(num($('cap').value)-l.salary).toLocaleString('en-AU')}</p></div>`).join('')};
 </script></body></html>
