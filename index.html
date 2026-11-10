@@ -35,17 +35,40 @@ let players=[],adjustments={};
 const $=id=>document.getElementById(id);
 function num(v){if(typeof v==='string'&&v.includes(':')){let a=v.split(':');return Number(a[0])+Number(a[1])/60}let n=Number(String(v??'').replace(/[$,]/g,''));return Number.isFinite(n)?n:0}
 function parseCSV(s){
- s=String(s||'').replace(/^\\uFEFF/,'').replace(/\\0/g,'');
- const first=(s.split(/\\r?\\n/,1)[0]||'');
- const delimiter=(first.match(/;/g)||[]).length>(first.match(/,/g)||[]).length?';':',';
- let rows=[],row=[],v='',q=false;
- for(let i=0;i<s.length;i++){let c=s[i],n=s[i+1];if(c==='"'&&q&&n==='"'){v+='"';i++}else if(c==='"')q=!q;else if(c===delimiter&&!q){row.push(v);v=''}else if((c==='\\n'||c==='\\r')&&!q){if(c==='\\r'&&n==='\\n')i++;row.push(v);if(row.some(x=>String(x).trim()))rows.push(row);row=[];v=''}else v+=c}
- row.push(v);if(row.some(x=>String(x).trim()))rows.push(row);
+ s=String(s||'').replace(/^\uFEFF/,'').replace(/\0/g,'');
+ const lines=s.split(/\r\n|\n|\r/);
+ const first=lines[0]||'';
+ const commas=(first.match(/,/g)||[]).length;
+ const semicolons=(first.match(/;/g)||[]).length;
+ const delimiter=semicolons>commas?';':',';
+ const rows=[];
+ let row=[],v='',q=false;
+ for(let i=0;i<s.length;i++){
+  const c=s[i],n=s[i+1];
+  if(c==='"'&&q&&n==='"'){v+='"';i++;}
+  else if(c==='"'){q=!q;}
+  else if(c===delimiter&&!q){row.push(v);v='';}
+  else if((c==='\n'||c==='\r')&&!q){
+   if(c==='\r'&&n==='\n')i++;
+   row.push(v);
+   if(row.some(x=>String(x).trim()))rows.push(row);
+   row=[];v='';
+  }else{v+=c;}
+ }
+ row.push(v);
+ if(row.some(x=>String(x).trim()))rows.push(row);
  if(!rows.length)throw Error('The selected file is empty or could not be read.');
- const h=rows.shift().map(x=>String(x).trim().replace(/^\\uFEFF/,'').replace(/^"|"$/g,''));
- const nameIndex=h.findIndex(x=>x.toLowerCase()==='name');
- if(nameIndex<0)throw Error('CSV header not recognised: could not find a Name column.');
- return rows.map(r=>{let o={};h.forEach((k,i)=>o[k]=r[i]??'');return o}).filter(x=>String(x.Name||'').trim());
+ const headers=rows.shift().map(x=>String(x).trim().replace(/^\uFEFF/,'').replace(/^"|"$/g,''));
+ const nameHeader=headers.find(h=>h.toLowerCase()==='name');
+ if(!nameHeader)throw Error('CSV header not recognised: could not find a Name column.');
+ return rows.map(r=>{
+  const o={};
+  headers.forEach((h,i)=>o[h]=r[i]??'');
+  return o;
+ }).filter(x=>String(x[nameHeader]||'').trim()).map(x=>{
+  if(nameHeader!=='Name')x.Name=x[nameHeader];
+  return x;
+ });
 }
 function readFileText(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));reader.onerror=()=>reject(reader.error||new Error('Could not read the selected file.'));reader.readAsText(file);});}
 function proj(p){return num(p.Projection)*(1+(adjustments[String(p.Opponent||'').toUpperCase()]||0)/100)}
