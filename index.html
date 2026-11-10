@@ -34,12 +34,25 @@ table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;p
 let players=[],adjustments={};
 const $=id=>document.getElementById(id);
 function num(v){if(typeof v==='string'&&v.includes(':')){let a=v.split(':');return Number(a[0])+Number(a[1])/60}let n=Number(String(v??'').replace(/[$,]/g,''));return Number.isFinite(n)?n:0}
-function parseCSV(s){s=s.replace(/^\\uFEFF/,'');let rows=[],row=[],v='',q=false;for(let i=0;i<s.length;i++){let c=s[i],n=s[i+1];if(c==='"'&&q&&n==='"'){v+='"';i++}else if(c==='"')q=!q;else if(c===','&&!q){row.push(v);v=''}else if((c==='\\n'||c==='\\r')&&!q){if(c==='\\r'&&n==='\\n')i++;row.push(v);if(row.some(x=>x.trim()))rows.push(row);row=[];v=''}else v+=c}row.push(v);if(row.some(x=>x.trim()))rows.push(row);let h=rows.shift().map(x=>x.trim().replace(/^"|"$/g,''));return rows.map(r=>{let o={};h.forEach((k,i)=>o[k]=r[i]??'');return o}).filter(x=>x.Name)}
+function parseCSV(s){
+ s=String(s||'').replace(/^\\uFEFF/,'').replace(/\\0/g,'');
+ const first=(s.split(/\\r?\\n/,1)[0]||'');
+ const delimiter=(first.match(/;/g)||[]).length>(first.match(/,/g)||[]).length?';':',';
+ let rows=[],row=[],v='',q=false;
+ for(let i=0;i<s.length;i++){let c=s[i],n=s[i+1];if(c==='"'&&q&&n==='"'){v+='"';i++}else if(c==='"')q=!q;else if(c===delimiter&&!q){row.push(v);v=''}else if((c==='\\n'||c==='\\r')&&!q){if(c==='\\r'&&n==='\\n')i++;row.push(v);if(row.some(x=>String(x).trim()))rows.push(row);row=[];v=''}else v+=c}
+ row.push(v);if(row.some(x=>String(x).trim()))rows.push(row);
+ if(!rows.length)throw Error('The selected file is empty or could not be read.');
+ const h=rows.shift().map(x=>String(x).trim().replace(/^\\uFEFF/,'').replace(/^"|"$/g,''));
+ const nameIndex=h.findIndex(x=>x.toLowerCase()==='name');
+ if(nameIndex<0)throw Error('CSV header not recognised: could not find a Name column.');
+ return rows.map(r=>{let o={};h.forEach((k,i)=>o[k]=r[i]??'');return o}).filter(x=>String(x.Name||'').trim());
+}
+function readFileText(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));reader.onerror=()=>reject(reader.error||new Error('Could not read the selected file.'));reader.readAsText(file);});}
 function proj(p){return num(p.Projection)*(1+(adjustments[String(p.Opponent||'').toUpperCase()]||0)/100)}
 function eligible(p){return !/OUT|INACTIVE|SCRATCH/i.test(p.Status||'')&&num(p.Price)>0&&proj(p)>0&&[p.Position,p.Position2].some(Boolean)}
 function positions(p){return [p.Position,p.Position2].map(x=>String(x||'').trim().toUpperCase()).filter(Boolean)}
 function render(){let list=players.filter(p=>(p.Name+' '+p.Team).toLowerCase().includes($('search').value.toLowerCase()));$('tbody').innerHTML=list.slice(0,250).map(p=>`<tr><td>${p.Name}</td><td>${p.Team}</td><td>${p.Opponent}</td><td>$${num(p.Price).toLocaleString('en-AU')}</td><td>${proj(p).toFixed(1)}</td><td>${(proj(p)/(num(p.Price)/1000)).toFixed(2)}</td><td>${p.Status||'—'}</td></tr>`).join('');$('total').textContent=players.length;$('eligible').textContent=players.filter(eligible).length;$('teams').textContent=new Set(players.map(p=>p.Team)).size}
-$('csv').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;try{players=parseCSV(await f.text());if(!players.length)throw Error('No player rows found. Check that this is the Draftstars CSV.');render();$('load').textContent=`Loaded ${players.length} players from ${f.name}.`;$('msg').textContent='Ready to generate.'}catch(err){$('load').textContent=err.message}});
+$('csv').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;try{players=parseCSV(await readFileText(f));if(!players.length)throw Error('No player rows found. Check that this is the Draftstars CSV.');render();$('load').textContent=`Loaded ${players.length} players from ${f.name}.`;$('msg').textContent='Ready to generate.'}catch(err){$('load').textContent=err.message}});
 $('search').addEventListener('input',render);
 $('apply').onclick=()=>{let o=$('opp').value.trim().toUpperCase(),a=num($('adj').value);if(!o){$('matchmsg').textContent='Enter an opponent team first.';return}adjustments[o]=Math.max(-30,Math.min(30,a));$('matchmsg').textContent=`${o}: ${adjustments[o]>0?'+':''}${adjustments[o]}% projection adjustment applied.`;render()};
 function build(){const cap=num($('cap').value)||100000,slots=['PG','PG','SG','SG','SF','SF','PF','PF','C'],pool=players.filter(eligible);if(!pool.length)return null;
