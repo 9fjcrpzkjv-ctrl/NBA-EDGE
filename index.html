@@ -157,7 +157,7 @@ function buildOne(seed, usedSet){
     remaining[chosen]--;
     const used=new Set(state.used);used.add(id);
     const score=state.score+v;
-    const exposureCount=usedSet.get(id)||0;const rank=state.rank+v-(exposureCount*v*.25);
+    const exposureCount=usedSet.get(id)||0;const rank=state.rank+v-(exposureCount*v*1.5);
     next.push({remaining,spent:state.spent+p.Price,score,rank,picked:[...state.picked,p],used});
    }
   }
