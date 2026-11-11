@@ -47,7 +47,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 <div class="row"><div><label>Search player/team</label><input id="search" placeholder="Search names or teams"></div><div><label>Availability</label><select id="status"><option value="active">Eligible only</option><option value="all">All players</option><option value="starter">Estimated starters</option></select></div></div>
 <div class="statgrid" style="margin:12px 0"><div class="stat"><b id="total">—</b><span class="small">Players loaded</span></div><div class="stat"><b id="eligible">—</b><span class="small">Eligible</span></div><div class="stat"><b id="games">—</b><span class="small">Teams represented</span></div></div>
 <p class="notice" id="zerowarn" style="display:none"></p>
-<div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Salary</th><th>Projection</th><th>Value/1k</th><th>Status</th></tr></thead><tbody id="pool"></tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Salary</th><th>Projection</th><th>Value/1k</th><th>Status</th><th>Control</th></tr></thead><tbody id="pool"></tbody></table></div>
 </section>
 <section class="card"><h2>4. Generate lineups</h2>
 <p class="small">Roster template: 2 PG · 2 SG · 2 SF · 2 PF · 1 C. Players with multi-position eligibility can fill either slot.</p>
@@ -70,6 +70,7 @@ function norm(p){const status=String(p.Status||'').trim().toUpperCase().replace(
 
 players=players.map(norm);
 let gameLogs=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeGameLogs')||'[]')}catch(e){return []}})(), logSummary={};
+let excludedPlayers=new Set((()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeExcludedPlayers')||'[]')}catch(e){return []}})().map(String));
 let defenseByOpponentPosition={},defenseBaselineByPosition={},teamPaceEstimate={},leaguePaceEstimate=0;
 const alias=x=>String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
 function field(o,names){for(const n of names){if(o[n]!==undefined&&o[n]!==''&&o[n]!==null)return o[n];}return 0;}
@@ -148,17 +149,18 @@ function render(){
  $('total').textContent=players.length;$('eligible').textContent=players.filter(eligible).length;$('games').textContent=new Set(players.map(p=>p.Team).filter(Boolean)).size;
  const zero=players.filter(p=>p.Projection<=0),zeroUnmarked=zero.filter(p=>!unavailable(p));
  const zw=$('zerowarn');if(zw){zw.style.display=zero.length?'block':'none';zw.textContent=`Projection check: ${zero.length} players have a zero baseline projection; ${zeroUnmarked.length} are not marked OUT, QUESTIONABLE or DOUBTFUL. Zero-projection players are excluded from lineups. Verify these players before entering.`;}
- $('pool').innerHTML=list.slice(0,180).map(p=>{let pr=proj(p);const statusText=p.Projection<=0?'CHECK: 0 projection':(p.Status||'Unconfirmed');const projectionText=pr===null?'Need inputs':(['adjusted','matchup'].includes($('mode').value)&&Math.abs(pr-p.Projection)>0.05?`${p.Projection.toFixed(1)} → ${pr.toFixed(1)}`:pr.toFixed(1));return `<tr><td>${p.Name}</td><td>${p.Team}</td><td>${p.Price.toLocaleString('en-AU')}</td><td>${projectionText}</td><td>${pr&&p.Price?(pr/(p.Price/1000)).toFixed(2):'—'}</td><td class="${p.Projection<=0?'q':p.Status==='OUT OF GAME'?'out':p.Status==='QUESTIONABLE TO PLAY'?'q':''}">${statusText}</td></tr>`}).join('');
+ $('pool').innerHTML=list.slice(0,180).map(p=>{let pr=proj(p);const statusText=p.Projection<=0?'CHECK: 0 projection':(p.Status||'Unconfirmed');const projectionText=pr===null?'Need inputs':(['adjusted','matchup'].includes($('mode').value)&&Math.abs(pr-p.Projection)>0.05?`${p.Projection.toFixed(1)} → ${pr.toFixed(1)}`:pr.toFixed(1));return `<tr><td>${p.Name}</td><td>${p.Team}</td><td>${p.Price.toLocaleString('en-AU')}</td><td>${projectionText}</td><td>${pr&&p.Price?(pr/(p.Price/1000)).toFixed(2):'—'}</td><td class="${p.Projection<=0?'q':p.Status==='OUT OF GAME'?'out':p.Status==='QUESTIONABLE TO PLAY'?'q':''}">${excludedPlayers.has(String(p.ID))?'MANUALLY EXCLUDED':statusText}</td><td><button type="button" class="secondary" data-exclude="${encodeURIComponent(String(p.ID))}">${excludedPlayers.has(String(p.ID))?'Restore':'Exclude'}</button></td></tr>`}).join('');
  const edgeReady=players.some(p=>p._edge);
  if(['adjusted','matchup','edgeMatchup'].includes($('mode').value)){const adjusted=players.filter(p=>p.Projection>0&&p._edge&&p._edge.games>=5&&p._edge.sampleMinutes>0).length;const matchupCount=players.filter(p=>{const pos=String(p.Position||'').toUpperCase(),opp=String(p.Opponent||p.Opp||'').toUpperCase(),a=defenseByOpponentPosition[opp+'|'+pos],b=defenseBaselineByPosition[pos];return !!(a&&b&&a.n>=8&&b.n>=20);}).length;$('modelmsg').textContent=$('mode').value==='edgeMatchup'?('NBA Edge independent historical projection + opponent/position adjustment (max ±5%) + estimated game pace (max ±3%). '+matchupCount+' players have enough opponent-position samples. Pace is estimated from box-score FGA, FTA and turnovers; experimental and not yet backtested.'):($('mode').value==='matchup'?('Fantasy Insider baseline + minutes trend (max ±10%) + opponent/position adjustment (max ±5%). '+adjusted+' players have sufficient minutes history; '+matchupCount+' have enough opponent-position samples. Experimental and not yet backtested.'):('Fantasy Insider baseline with minutes trend adjustment (max ±10%) for '+adjusted+' players.'));}else $('modelmsg').textContent=edgeReady?'Historical game logs detected. NBA Edge mode can calculate projections for matched players.':'Upload a historical game-log CSV to activate independent projections.';
 }
 function slots(){return ['PG','PG','SG','SG','SF','SF','PF','PF','C']}
 function positions(p){return [p.Position,p.Position2].filter(Boolean)}
+function lineupUtility(p){const projection=proj(p)||0;if($('objective').value!=='upside')return projection;const volatility=num(p.SD)>0?num(p.SD):projection*.30;return projection+volatility*.35;}
 function can(p,s){return positions(p).includes(s)}
 function buildOne(seed, usedSet, seenKeys){
  const required={PG:2,SG:2,SF:2,PF:2,C:1};
  const cap=num($('cap').value)||100000;
- const pool=players.filter(p=>eligible(p)&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0);
+ const pool=players.filter(p=>!excludedPlayers.has(String(p.ID))&&eligible(p)&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0);
  let nodes=0;
  function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;const spread=$('objective').value==='balanced'?1.5:5;return (x%10000)/10000*spread}
  function search(picked,remaining,spent,score){
@@ -180,8 +182,8 @@ function buildOne(seed, usedSet, seenKeys){
   }
   if(!candidates||!candidates.length)return null;
   candidates.sort((a,b)=>{
-   const ra=proj(a)-(usedSet.get(String(a.ID))||0)*2+noise(a.ID);
-   const rb=proj(b)-(usedSet.get(String(b.ID))||0)*2+noise(b.ID);
+   const ra=lineupUtility(a)-(usedSet.get(String(a.ID))||0)*2+noise(a.ID);
+   const rb=lineupUtility(b)-(usedSet.get(String(b.ID))||0)*2+noise(b.ID);
    return rb-ra;
   });
   for(const p of candidates.slice(0,45)){
@@ -198,8 +200,8 @@ function generate(){
  generated=[];let exposure=new Map(),seenKeys=new Set(),tries=0,n=Number($('count').value);
  while(generated.length<n&&tries<n*150){tries++;let l=buildOne(tries,exposure,seenKeys);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
  generated.sort((a,b)=>b.score-a.score);
- const blocked=players.filter(unavailable).length;
- $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Excluded ${blocked} questionable, doubtful or out players. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found. Eligible players: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check the salary cap and position eligibility, or try Benchmark mode.`;
+ const blocked=players.filter(unavailable).length,manual=excludedPlayers.size;
+ $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Excluded ${blocked} questionable, doubtful or out players plus ${manual} manually excluded. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found. Eligible players: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check the salary cap and position eligibility, or try Benchmark mode.`;
  $('lineups').innerHTML=generated.map((l,i)=>`<div class="lineup"><div class="lineuphead"><b>${i===0?'⭐ Suggested $15 entry':'Virtual lineup '+(i+1)}</b><span class="badge">${l.score.toFixed(1)} proj.</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} <span class="pill">${p.Position}${p.Position2?'/'+p.Position2:''}</span></span><span>$${p.Price.toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<div class="small" style="margin-top:8px">Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${((num($('cap').value)||100000)-l.salary).toLocaleString('en-AU')}</div></div>`).join('');
 }
 function parseCSV(text){
@@ -261,6 +263,7 @@ $('logsfile').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)
 $('file').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('loadmsg').textContent=`Reading ${f.name}…`;try{const imported=parseCSV(await readTextFile(f));if(imported.length===0)throw new Error('No player rows found. Make sure this is the Draftstars Player CSV, not an Excel workbook or PDF.');players=imported;if(gameLogs.length)calcLogs(gameLogs);generated=[];$('lineups').innerHTML='';$('loadmsg').textContent=`Successfully loaded ${players.length} players from ${f.name}.`+(gameLogs.length?' Historical logs restored and matched to this slate.':'');render()}catch(err){$('loadmsg').textContent=err.message||'Could not read that CSV.';alert($('loadmsg').textContent);}});
 ['search','status','mode'].forEach(id=>$(id).addEventListener('input',render));
 $('generate').addEventListener('click',generate);
+$('pool').addEventListener('click',e=>{const b=e.target.closest('[data-exclude]');if(!b)return;const id=decodeURIComponent(b.getAttribute('data-exclude'));if(excludedPlayers.has(id))excludedPlayers.delete(id);else excludedPlayers.add(id);try{localStorage.setItem('nbaEdgeExcludedPlayers',JSON.stringify([...excludedPlayers]));}catch(err){}generated=[];$('lineups').innerHTML='';render();});
 $('save').addEventListener('click',()=>{$('resultmsg').textContent=`Recorded: score ${$('actual').value||'not entered'}, rank ${$('rank').value||'not entered'}, prize $${$('prize').value||'0'}. Keep this record with your slate results.`});
 if(gameLogs.length)calcLogs(gameLogs);
  render();
