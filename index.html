@@ -45,6 +45,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 <section class="card"><h2>3. Player pool</h2>
 <div class="row"><div><label>Search player/team</label><input id="search" placeholder="Search names or teams"></div><div><label>Availability</label><select id="status"><option value="active">Eligible only</option><option value="all">All players</option><option value="starter">Estimated starters</option></select></div></div>
 <div class="statgrid" style="margin:12px 0"><div class="stat"><b id="total">—</b><span class="small">Players loaded</span></div><div class="stat"><b id="eligible">—</b><span class="small">Eligible</span></div><div class="stat"><b id="games">—</b><span class="small">Teams represented</span></div></div>
+<p class="notice" id="zerowarn" style="display:none"></p>
 <div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Salary</th><th>Projection</th><th>Value/1k</th><th>Status</th></tr></thead><tbody id="pool"></tbody></table></div>
 </section>
 <section class="card"><h2>4. Generate lineups</h2>
@@ -125,7 +126,9 @@ function render(){
  const q=$('search').value.toLowerCase(),st=$('status').value;
  const list=players.filter(p=>(st==='all'||(st==='active'?eligible(p):p.Status==='ESTIMATED STARTER'))&&(`${p.Name} ${p.Team}`.toLowerCase().includes(q)));
  $('total').textContent=players.length;$('eligible').textContent=players.filter(eligible).length;$('games').textContent=new Set(players.map(p=>p.Team).filter(Boolean)).size;
- $('pool').innerHTML=list.slice(0,180).map(p=>{let pr=proj(p);return `<tr><td>${p.Name}</td><td>${p.Team}</td><td>$${p.Price.toLocaleString('en-AU')}</td><td>${pr===null?'Need inputs':pr.toFixed(1)}</td><td>${pr&&p.Price?(pr/(p.Price/1000)).toFixed(2):'—'}</td><td class="${p.Status==='OUT OF GAME'?'out':p.Status==='QUESTIONABLE TO PLAY'?'q':''}">${p.Status||'Unconfirmed'}</td></tr>`}).join('');
+ const zero=players.filter(p=>p.Projection<=0),zeroUnmarked=zero.filter(p=>!unavailable(p));
+ const zw=$('zerowarn');if(zw){zw.style.display=zero.length?'block':'none';zw.textContent=`Projection check: ${zero.length} players have a zero baseline projection; ${zeroUnmarked.length} are not marked OUT, QUESTIONABLE or DOUBTFUL. Zero-projection players are excluded from lineups. Verify these players before entering.`;}
+ $('pool').innerHTML=list.slice(0,180).map(p=>{let pr=proj(p);const statusText=p.Projection<=0?'CHECK: 0 projection':(p.Status||'Unconfirmed');return `<tr><td>${p.Name}</td><td>${p.Team}</td><td>${p.Price.toLocaleString('en-AU')}</td><td>${pr===null?'Need inputs':pr.toFixed(1)}</td><td>${pr&&p.Price?(pr/(p.Price/1000)).toFixed(2):'—'}</td><td class="${p.Projection<=0?'q':p.Status==='OUT OF GAME'?'out':p.Status==='QUESTIONABLE TO PLAY'?'q':''}">${statusText}</td></tr>`}).join('');
  const edgeReady=players.some(p=>p._edge);
  $('modelmsg').textContent=edgeReady?'Historical game logs detected. NBA Edge mode can calculate projections for matched players.':'Upload a historical game-log CSV to activate independent projections.';
 }
@@ -135,7 +138,7 @@ function can(p,s){return positions(p).includes(s)}
 function buildOne(seed, usedSet, seenKeys){
  const required={PG:2,SG:2,SF:2,PF:2,C:1};
  const cap=num($('cap').value)||100000;
- const pool=players.filter(p=>eligible(p)&&proj(p)!==null&&Number.isFinite(p.Price)&&p.Price>0);
+ const pool=players.filter(p=>eligible(p)&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0);
  let nodes=0;
  function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;return (x%10000)/10000*18}
  function search(picked,remaining,spent,score){
