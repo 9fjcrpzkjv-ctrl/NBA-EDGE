@@ -273,6 +273,7 @@ function buildOne(seed, usedSet, seenKeys){
  function feasible(state){
   const slots=Object.entries(state.remaining).filter(([,n])=>n>0);
   if(!slots.length)return true;
+  const slotsLeft=slots.reduce((sum,[,n])=>sum+n,0);
   // Safe lower bound: use the cheapest distinct remaining players overall.
   // Position-by-position minima can double-count multi-position players.
   const prices=pool.filter(p=>!state.players.some(q=>String(q.ID)===String(p.ID))).map(p=>p.Price).sort((a,b)=>a-b);
