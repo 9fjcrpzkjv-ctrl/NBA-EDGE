@@ -131,14 +131,17 @@ function calcLogs(rows){
   const name=field(g,['PLAYER_NAME','Player','Name','player_name','name']);
   const key=alias(name);if(!key)continue;
   const mins=num(field(g,['MIN','Minutes','minutes']));
-  if(mins<=0)continue;
   const date=String(field(g,['GAME_DATE','Date','date'])||'');
   const fantasy=dsFantasy(g);
-  (grouped[key]??=[]).push({date,mins,fantasy,fppm:fantasy/mins});
+  (grouped[key]??=[]).push({date,mins,fantasy,fppm:mins>0?fantasy/mins:0});
  }
  logSummary={};
- for(const [key,arr] of Object.entries(grouped)){
-  arr.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+ for(const [key,allRows] of Object.entries(grouped)){
+  allRows.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const zeroRecent=allRows.slice(0,5).filter(x=>x.mins<=0).length;
+  const zeroSample=allRows.filter(x=>x.mins<=0).length;
+  const arr=allRows.filter(x=>x.mins>0);
+  if(!arr.length)continue;
   const last5=arr.slice(0,5),last10=arr.slice(0,10),sample=arr;
   const avg=(a,k)=>a.length?a.reduce((sum,x)=>sum+x[k],0)/a.length:0;
   const fppm5=avg(last5,'fppm'),fppm10=avg(last10,'fppm'),fppmSample=avg(sample,'fppm');
@@ -148,7 +151,7 @@ function calcLogs(rows){
   const projectedMinutes=.70*recentMinutes+.30*sampleMinutes;
   const projection=fppm*projectedMinutes;
   const fantasyValues=last10.map(x=>x.fantasy),historicalSd=fantasyValues.length>=2?Math.sqrt(fantasyValues.reduce((sum,x)=>sum+Math.pow(x-avg(last10,'fantasy'),2),0)/(fantasyValues.length-1)):0;
-  logSummary[key]={games:arr.length,last5:avg(last5,'fantasy'),last10:avg(last10,'fantasy'),sampleAvg:avg(sample,'fantasy'),fppm,recentMinutes,sampleMinutes,projectedMinutes,projection,historicalSd};
+  logSummary[key]={games:arr.length,zeroRecent,zeroSample,last5:avg(last5,'fantasy'),last10:avg(last10,'fantasy'),sampleAvg:avg(sample,'fantasy'),fppm,recentMinutes,sampleMinutes,projectedMinutes,projection,historicalSd};
  }
  players.forEach(p=>{p._edge=logSummary[alias(p.Name)]||null;});
  const slateByName={};players.forEach(p=>{slateByName[alias(p.Name)]=p;});
@@ -203,13 +206,14 @@ function render(){
  const ar=$('accuracyreport');if(ar)ar.textContent=snap?(scored.length+' of '+snap.players.length+' saved players matched to actual game logs for '+snapDate+'. Lower mean absolute error is better; mean error shows over/under-projection. Logs must contain completed games for this exact date.'):'Save a snapshot before tip-off to start measuring model accuracy.';
  const ownCount=players.filter(p=>Number.isFinite(ownershipByName[alias(p.Name)])).length;
  const ownMsg=$('ownershipmsg');if(ownMsg)ownMsg.textContent=ownCount+' player ownership estimates matched to this slate. '+(ownCount?'Leverage ranking will only adjust matched players; missing estimates remain neutral.':'No estimates matched. Leverage ranking will behave like standard ranking until ownership data is entered.');
- const minEl=$('minutesalerts');if(minEl){const trends=players.filter(p=>p._edge&&p._edge.games>=5&&p._edge.sampleMinutes>0).map(p=>({name:p.Name,team:p.Team,recent:p._edge.recentMinutes,sample:p._edge.sampleMinutes,change:p._edge.recentMinutes/p._edge.sampleMinutes-1})).filter(x=>Math.abs(x.change)>=.15).sort((a,b)=>Math.abs(b.change)-Math.abs(a.change)).slice(0,12);minEl.innerHTML='<b>Minutes trend alerts (last 5 vs retrieved sample)</b><br>'+(trends.length?trends.map(x=>x.name+' ('+x.team+'): '+x.recent.toFixed(1)+' vs '+x.sample.toFixed(1)+' mins ('+(x.change>0?'+':'')+Math.round(x.change*100)+'%)').join(' · '):'No strong minutes changes found with at least 5 games of history.')+'<br><span class="small">These are historical trends, not confirmed rotations or guaranteed future minutes.</span>';}
+ const minEl=$('minutesalerts');if(minEl){const trends=players.filter(p=>p._edge&&p._edge.games>=5&&p._edge.sampleMinutes>0).map(p=>({name:p.Name,team:p.Team,recent:p._edge.recentMinutes,sample:p._edge.sampleMinutes,change:p._edge.recentMinutes/p._edge.sampleMinutes-1})).filter(x=>Math.abs(x.change)>=.15).sort((a,b)=>Math.abs(b.change)-Math.abs(a.change)).slice(0,12);const dnp=players.filter(p=>p._edge&&p._edge.games>=3&&p._edge.zeroRecent>0).sort((a,b)=>b._edge.zeroRecent-a._edge.zeroRecent||a._edge.recentMinutes-b._edge.recentMinutes).slice(0,10);minEl.innerHTML='<b>Minutes trend alerts (last 5 vs retrieved sample)</b><br>'+(trends.length?trends.map(x=>x.name+' ('+x.team+'): '+x.recent.toFixed(1)+' vs '+x.sample.toFixed(1)+' mins ('+(x.change>0?'+':'')+Math.round(x.change*100)+'%)').join(' · '):'No strong minutes changes found with at least 5 games of history.')+'<br><b>DNP / rotation-risk flags</b><br>'+(dnp.length?dnp.map(p=>p.Name+' ('+p.Team+'): '+p._edge.zeroRecent+' zero-minute game(s) in last 5 logged appearances; lineup score penalty '+Math.round((1-rotationReliability(p))*100)+'%').join(' · '):'No recent zero-minute games found in retrieved logs.')+'<br><span class="small">Historical flags are risk signals, not confirmed future rotations. Zero-minute rows must be present in the source game logs to be detected.</span>';}
  const edgeReady=players.some(p=>p._edge);
  if(['adjusted','matchup','edgeMatchup'].includes($('mode').value)){const adjusted=players.filter(p=>p.Projection>0&&p._edge&&p._edge.games>=5&&p._edge.sampleMinutes>0).length;const matchupCount=players.filter(p=>{const pos=String(p.Position||'').toUpperCase(),opp=String(p.Opponent||p.Opp||'').toUpperCase(),a=defenseByOpponentPosition[opp+'|'+pos],b=defenseBaselineByPosition[pos];return !!(a&&b&&a.n>=8&&b.n>=20);}).length;const matched=players.filter(p=>p._edge&&eligible(p)).length,coverage=players.filter(eligible).length?Math.round(100*matched/players.filter(eligible).length):0;$('modelmsg').textContent=$('mode').value==='edgeMatchup'?('NBA Edge independent historical projection + opponent/position adjustment (max ±5%) + estimated game pace (max ±3%). Historical projections matched: '+matched+' of '+players.filter(eligible).length+' baseline-eligible players ('+coverage+'%). '+matchupCount+' players have sufficient opponent-position samples. Players marked “Need inputs” are excluded. Experimental and not yet backtested.'):($('mode').value==='matchup'?('Fantasy Insider baseline + minutes trend (max ±10%) + opponent/position adjustment (max ±5%). '+adjusted+' players have sufficient minutes history; '+matchupCount+' have enough opponent-position samples. Experimental and not yet backtested.'):('Fantasy Insider baseline with minutes trend adjustment (max ±10%) for '+adjusted+' players.'));}else $('modelmsg').textContent=edgeReady?'Historical game logs detected. NBA Edge mode can calculate projections for matched players.':'Upload a historical game-log CSV to activate independent projections.';
 }
 function slots(){return ['PG','PG','SG','SG','SF','SF','PF','PF','C']}
 function positions(p){return [p.Position,p.Position2].filter(Boolean)}
-function lineupUtility(p){const projection=proj(p)||0;let score=projection;if($('objective').value==='upside'){const independent=['edge','edgeMatchup'].includes($('mode').value);const volatility=independent?(p._edge&&p._edge.games>=5&&p._edge.historicalSd>0?p._edge.historicalSd:projection*.30):(num(p.SD)>0?num(p.SD):projection*.30);score=projection+volatility*.35;}if($('rankingmode')?.value==='leverage'){const own=ownershipByName[alias(p.Name)];if(Number.isFinite(own))score*=1+Math.max(-.15,Math.min(.15,(50-own)*.003));}return score;}
+function rotationReliability(p){const e=p&&p._edge;if(!e||e.games<3)return 1;if(e.zeroRecent>=2)return .45;if(e.zeroRecent===1)return .72;if(e.recentMinutes<8)return .70;if(e.recentMinutes<12&&e.sampleMinutes>=18)return .82;return 1;}
+function lineupUtility(p){const projection=proj(p)||0;let score=projection;if($('objective').value==='upside'){const independent=['edge','edgeMatchup'].includes($('mode').value);const volatility=independent?(p._edge&&p._edge.games>=5&&p._edge.historicalSd>0?p._edge.historicalSd:projection*.30):(num(p.SD)>0?num(p.SD):projection*.30);score=projection+volatility*.35;}score*=rotationReliability(p);if($('rankingmode')?.value==='leverage'){const own=ownershipByName[alias(p.Name)];if(Number.isFinite(own))score*=1+Math.max(-.15,Math.min(.15,(50-own)*.003));}return score;}
 function blowoutRisk(spread){const margin=Math.abs(Number(spread)||0);if(margin<8)return 0;if(margin<12)return .015;if(margin<16)return .035;if(margin<20)return .06;return .09;}
 function applyGameContext(p,value){if(!Number.isFinite(value))return value;const team=String(p.Team||'').toUpperCase(),opp=String(p.Opponent||p.Opp||'').toUpperCase();const ctx=gameContext[team+'|'+opp]||gameContext[opp+'|'+team];if(!ctx)return value;const totals=Object.values(gameContext).map(x=>num(x.total)).filter(x=>x>0);const avgTotal=totals.length?totals.reduce((a,b)=>a+b,0)/totals.length:0;let adjusted=value;if(ctx.total>0&&avgTotal>0){const totalFactor=Math.max(.96,Math.min(1.04,1+(ctx.total-avgTotal)*.003));adjusted*=totalFactor;}const spread=team===ctx.team?num(ctx.spread):-num(ctx.spread);const risk=blowoutRisk(spread);const isStarter=String(p.Status||'').toUpperCase().includes('STARTER');if(isStarter)adjusted*=1-risk;return adjusted;}
 function can(p,s){return positions(p).includes(s)}
