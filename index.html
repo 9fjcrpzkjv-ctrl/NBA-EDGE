@@ -150,7 +150,7 @@ function buildOne(seed, usedSet, seenKeys){
  const cap=num($('cap').value)||100000;
  const pool=players.filter(p=>eligible(p)&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0);
  let nodes=0;
- function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;return (x%10000)/10000*18}
+ function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;const spread=$('objective').value==='balanced'?1.5:5;return (x%10000)/10000*spread}
  function search(picked,remaining,spent,score){
   if(++nodes>12000)return null;
   if(Object.values(remaining).every(v=>v===0)){
@@ -170,8 +170,8 @@ function buildOne(seed, usedSet, seenKeys){
   }
   if(!candidates||!candidates.length)return null;
   candidates.sort((a,b)=>{
-   const ra=proj(a)-(usedSet.get(String(a.ID))||0)*5+noise(a.ID);
-   const rb=proj(b)-(usedSet.get(String(b.ID))||0)*5+noise(b.ID);
+   const ra=proj(a)-(usedSet.get(String(a.ID))||0)*2+noise(a.ID);
+   const rb=proj(b)-(usedSet.get(String(b.ID))||0)*2+noise(b.ID);
    return rb-ra;
   });
   for(const p of candidates.slice(0,45)){
