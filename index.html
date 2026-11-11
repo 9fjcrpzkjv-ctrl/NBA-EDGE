@@ -41,6 +41,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 <p class="small">Expected columns: PLAYER_NAME or Name, GAME_DATE or Date, MIN, PTS, FGM, FGA, FTM, FTA, FG3M, REB, AST, STL, BLK, TOV. The app calculates Draftstars fantasy points from each box score, then blends last 10 games, season average and recent-vs-season minutes. Player names are matched to your Draftstars pool.</p>
 <div class="row"><div><label>Projection mode</label><select id="mode"><option value="benchmark">Fantasy Insider benchmark (original)</option><option value="adjusted">Fantasy Insider + NBA Edge minutes adjustment</option><option value="edge">NBA Edge independent (experimental)</option></select></div><div><label>Contest objective</label><select id="objective"><option value="upside">Tournament upside</option><option value="balanced">Balanced</option></select></div></div>
 <p class="small" id="modelmsg">Benchmark mode is active. Independent mode becomes available when historical inputs are present.</p>
+<p class="small" id="matchupdata">Checking saved matchup data…</p>
 </section>
 <section class="card"><h2>3. Player pool</h2>
 <div class="row"><div><label>Search player/team</label><input id="search" placeholder="Search names or teams"></div><div><label>Availability</label><select id="status"><option value="active">Eligible only</option><option value="all">All players</option><option value="starter">Estimated starters</option></select></div></div>
@@ -251,6 +252,7 @@ $('file').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)retu
 ['search','status','mode'].forEach(id=>$(id).addEventListener('input',render));
 $('generate').addEventListener('click',generate);
 $('save').addEventListener('click',()=>{$('resultmsg').textContent=`Recorded: score ${$('actual').value||'not entered'}, rank ${$('rank').value||'not entered'}, prize $${$('prize').value||'0'}. Keep this record with your slate results.`});
-if(gameLogs.length){calcLogs(gameLogs);const tagged=gameLogs.filter(g=>g.TEAM&&g.OPPONENT).length;const total=gameLogs.length;const note=` Saved matchup fields on ${tagged}/${total} historical rows.`;const mm=$('modelmsg');if(mm)mm.textContent+=note;}
+if(gameLogs.length)calcLogs(gameLogs);
  render();
+ const matchupStatus=$('matchupdata');if(matchupStatus){const tagged=gameLogs.filter(g=>g.TEAM&&g.OPPONENT).length;matchupStatus.textContent=`Saved matchup data check: ${tagged} of ${gameLogs.length} historical rows include both team and opponent.`;}
 </script></body></html>
