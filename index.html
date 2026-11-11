@@ -311,19 +311,15 @@ function buildFieldThresholds(seed){
  return scores.sort((a,b)=>a-b);
 }
 function lineupTournamentEvaluation(picked,seed,fieldThresholds){
- const rng=seededRandom(seed+104729),samples=[];
- for(let i=0;i<80;i++){let total=0;for(const p of picked)total+=playerOutcome(p,rng);samples.push(total);}
- samples.sort((a,b)=>a-b);
- const quantile=q=>fieldThresholds.length?fieldThresholds[Math.min(fieldThresholds.length-1,Math.floor(q*(fieldThresholds.length-1)))]:0;
- const top1=fieldThresholds.length?samples.filter(x=>x>=quantile(.99)).length/samples.length:0;
- const top01=fieldThresholds.length?samples.filter(x=>x>=quantile(.999)).length/samples.length:0;
- const mean=samples.reduce((a,b)=>a+b,0)/samples.length;
+ const mean=picked.reduce((sum,p)=>sum+Math.max(0,proj(p)||0)*rotationReliability(p),0);
+ const variance=picked.reduce((sum,p)=>{const sd=Math.max(1,playerVolatility(p,proj(p)||0));return sum+sd*sd;},0);
+ const ceiling=mean+.55*Math.sqrt(variance);
  const ownershipRows=picked.map(p=>ownershipEstimate(p)).filter(Number.isFinite);
  const avgOwn=ownershipRows.length?ownershipRows.reduce((a,b)=>a+b,0)/ownershipRows.length:0;
  const leverage=ownershipRows.length>=5?Math.max(-.12,Math.min(.12,(18-avgOwn)*.004)):0;
  const correlation=lineupCorrelationProfile(picked);
  const correlationBonus=$('rankingmode')?.value==='leverage'?correlation.rate*100:0;
- return {rankScore:top1*100+top01*250+mean*.012+leverage*100+correlationBonus,top1,top01,mean,avgOwn,correlation};
+ return {rankScore:ceiling+ceiling*leverage+correlationBonus,top1:null,top01:null,mean,avgOwn,correlation};
 }
 function autoEstimateOwnership(){const pool=players.filter(p=>eligible(p)&&proj(p)!==null&&proj(p)>0&&p.Price>0&&!excludedPlayers.has(String(p.ID)));if(!pool.length)return 0;const weighted=pool.map(p=>{const projection=Math.max(1,proj(p));const value=projection/(p.Price/1000);const starter=String(p.Status||'').includes('STARTER')?1.18:1;const injury=p._injuryWasStarter===true?1.05:1;const replacement=replacementOpportunityMultiplier(p);return {key:alias(p.Name),weight:Math.pow(projection,1.12)*Math.pow(Math.max(.1,value),.38)*starter*injury*replacement};});const total=weighted.reduce((a,x)=>a+x.weight,0);const next={};weighted.forEach(x=>next[x.key]=Math.min(65,Math.max(.5,900*x.weight/total)));ownershipByName=next;ownershipSourceByName={};Object.keys(next).forEach(k=>ownershipSourceByName[k]='modelled');try{localStorage.setItem('nbaEdgeOwnership',JSON.stringify(next));localStorage.setItem('nbaEdgeOwnershipSource',JSON.stringify(ownershipSourceByName));}catch(e){}return weighted.length;}
 function blowoutRisk(spread){const margin=Math.abs(Number(spread)||0);if(margin<8)return 0;if(margin<12)return .015;if(margin<16)return .035;if(margin<20)return .06;return .09;}
@@ -349,7 +345,7 @@ function buildOne(seed, usedSet, seenKeys, fieldThresholds){
   return !excludedPlayers.has(String(p.ID))&&eligible(p)&&riskCap>0&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&used<Math.min(maxAppearances,riskCap);
  });
  const maxShared=Math.max(0,Math.min(8,Number($('maxshared')?.value||7)));
- const beamWidth=28,branchWidth=9;
+ const beamWidth=16,branchWidth=7;
  function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;return (x%10000)/10000*.65;}
  function slotCandidates(state,pos){
   return pool.filter(p=>can(p,pos)&&!state.players.some(q=>String(q.ID)===String(p.ID))&&state.spent+p.Price<=cap);
@@ -383,7 +379,7 @@ function buildOne(seed, usedSet, seenKeys, fieldThresholds){
    const utilityOrder=[...list].sort((a,b)=>((proj(b)||0)*.55+playerVolatility(b,proj(b)||0)*.65+lineupUtility(b)*.25-(usedSet.get(String(b.ID))||0)*1.25+noise(b.ID))-((proj(a)||0)*.55+playerVolatility(a,proj(a)||0)*.65+lineupUtility(a)*.25-(usedSet.get(String(a.ID))||0)*1.25+noise(a.ID)));
    const valueOrder=[...list].sort((a,b)=>(((proj(b)||0)+playerVolatility(b,proj(b)||0)*.8)/(b.Price/1000))-(((proj(a)||0)+playerVolatility(a,proj(a)||0)*.8)/(a.Price/1000)));
    // Preserve both raw ceiling leaders and salary-efficient alternatives.
-   const branch=[...new Map([...utilityOrder.slice(0,6),...valueOrder.slice(0,3)].map(p=>[String(p.ID),p])).values()];
+   const branch=[...new Map([...utilityOrder.slice(0,5),...valueOrder.slice(0,2)].map(p=>[String(p.ID),p])).values()];
    branch.sort((a,b)=>((proj(b)||0)*.55+playerVolatility(b,proj(b)||0)*.65+lineupUtility(b)*.25)-((proj(a)||0)*.55+playerVolatility(a,proj(a)||0)*.65+lineupUtility(a)*.25));
    for(const p of branch.slice(0,branchWidth)){
     const remaining={...state.remaining};remaining[pos]--;
@@ -426,8 +422,8 @@ function buildOne(seed, usedSet, seenKeys, fieldThresholds){
 
 function generate(){
  if(['edge','edgeMatchup'].includes($('mode').value)&&!players.some(p=>p._edge)){alert('Retrieve historical NBA game logs first.');return}
- generated=[];let exposure=new Map(),seenKeys=new Set(),tries=0,n=Number($('count').value);const fieldThresholds=buildFieldThresholds(20261112);
- while(generated.length<n&&tries<n*8){tries++;let l=buildOne(tries,exposure,seenKeys,fieldThresholds);if(!l)continue;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
+ generated=[];let exposure=new Map(),seenKeys=new Set(),tries=0,n=Number($('count').value);const fieldThresholds=[];
+ while(generated.length<n&&tries<n*3){tries++;let l=buildOne(tries,exposure,seenKeys,fieldThresholds);if(!l)continue;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
  generated.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
  if(generated.length){const date=$('snapshotdate')?.value||new Date().toLocaleDateString('en-CA');const top=generated[0];const saved={date,projection:top.score,players:top.players.map(p=>({name:p.Name,team:p.Team,projection:proj(p)})),savedAt:new Date().toISOString()};try{localStorage.setItem('nbaEdgeSavedLineup',JSON.stringify(saved));updateAutoLineupResult();}catch(e){$('resultmsg').textContent='Lineup generated, but could not save it for automatic scoring. Browser storage may be full.';}}
  const blocked=players.filter(unavailable).length,manual=excludedPlayers.size;
@@ -437,7 +433,7 @@ function generate(){
  const riskRows=expRows.map(x=>{const e=x.player._edge;let level='LOW DATA',reason='Insufficient history',mins='—';if(e&&e.games>=3){mins=e.recentMinutes.toFixed(1);if(e.zeroRecent>=2){level='HIGH';reason=e.zeroRecent+' zero-minute games in last 5';}else if(e.zeroRecent===1){level='ELEVATED';reason='1 zero-minute game in last 5';}else if(e.recentMinutes<8){level='HIGH';reason='Low recent minutes';}else if(e.recentMinutes<12&&e.sampleMinutes>=18){level='ELEVATED';reason='Recent minutes below longer-term role';}else{level='LOW';reason='No major minutes warning';}}return {name:x.name,count:x.count,level,reason,mins};}).sort((a,b)=>a.level.localeCompare(b.level)||b.count-a.count);
  const riskAudit=riskRows.map(x=>x.name+' | '+x.level+' | '+x.mins+' recent MPG | '+x.reason+' | '+x.count+'/'+generated.length+' lineups').join('<br>');
  const expEl=$('exposurereport');if(expEl)expEl.innerHTML=generated.length?'<b>Player exposure and rotation-risk audit</b><br>'+expRows.map(p=>p.name+': '+p.count+'/'+generated.length+' ('+Math.round(p.count/generated.length*100)+'%)').join(' · ')+'<br><b>Risk review</b><br>'+riskAudit+'<br><span class="small">Players with at least one recent zero-minute appearance or fewer than 8 recent MPG are capped at 10% exposure. Players with 2+ zero-minute appearances in their last 5 logged appearances are excluded. Historical flags are not confirmed future rotations.</span>':'No exposure report yet.';
- $('lineups').innerHTML=generated.map((l,i)=>`<div class="lineup"><div class="lineuphead"><b>${i===0?'⭐ Suggested $15 entry':'Virtual lineup '+(i+1)}</b><span class="badge">${l.score.toFixed(1)} proj. · ${l.rankScore.toFixed(1)} tournament EV · ${l.tournament?(l.tournament.top1*100).toFixed(1):'—'}% top-1% modelled</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} <span class="pill">${p.Position}${p.Position2?'/'+p.Position2:''}</span></span><span>${p.Price.toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<div class="small" style="margin-top:8px">${l.correlation&&l.correlation.stacks?`Game correlation: ${l.correlation.stacks} stacked game(s), ${l.correlation.twoSided} with both teams represented`:'Game correlation: insufficient matchup data'}<br>Historical game pairs: ${l.correlation?.empiricalPairs||0} (${l.correlation?.teammatePairs||0} teammate, ${l.correlation?.opponentPairs||0} opponent)${l.correlation?.empiricalPairs?`, avg shrunk correlation ${(l.correlation.avgPairCorrelation*100).toFixed(1)}%`:' (need at least 5 shared games)'}<br>Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${((num($('cap').value)||100000)-l.salary).toLocaleString('en-AU')}</div></div>`).join('');
+ $('lineups').innerHTML=generated.map((l,i)=>`<div class="lineup"><div class="lineuphead"><b>${i===0?'⭐ Suggested $15 entry':'Virtual lineup '+(i+1)}</b><span class="badge">${l.score.toFixed(1)} proj. · ${l.rankScore.toFixed(1)} fast tournament score</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} <span class="pill">${p.Position}${p.Position2?'/'+p.Position2:''}</span></span><span>${p.Price.toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<div class="small" style="margin-top:8px">${l.correlation&&l.correlation.stacks?`Game correlation: ${l.correlation.stacks} stacked game(s), ${l.correlation.twoSided} with both teams represented`:'Game correlation: insufficient matchup data'}<br>Historical game pairs: ${l.correlation?.empiricalPairs||0} (${l.correlation?.teammatePairs||0} teammate, ${l.correlation?.opponentPairs||0} opponent)${l.correlation?.empiricalPairs?`, avg shrunk correlation ${(l.correlation.avgPairCorrelation*100).toFixed(1)}%`:' (need at least 5 shared games)'}<br>Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${((num($('cap').value)||100000)-l.salary).toLocaleString('en-AU')}</div></div>`).join('');
 }
 function parseCSV(text){
  text=String(text||'').replace(/^\uFEFF/,'');
