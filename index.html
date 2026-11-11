@@ -39,7 +39,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 <div style="margin:10px 0"><button id="testdata" type="button">Test free NBA data connection</button><p class="small" id="datamsg">This checks whether the free ESPN scoreboard feed is reachable. It does not change your lineups.</p></div>
 <div style="margin:10px 0"><button id="historydata" type="button">Retrieve recent NBA game logs</button><p class="small" id="historymsg">Checks completed NBA games from the previous day and attempts to read player box scores. It will not change the active projection mode.</p></div>
 <p class="small">Expected columns: PLAYER_NAME or Name, GAME_DATE or Date, MIN, PTS, FGM, FGA, FTM, FTA, FG3M, REB, AST, STL, BLK, TOV. The app calculates Draftstars fantasy points from each box score, then blends last 10 games, season average and recent-vs-season minutes. Player names are matched to your Draftstars pool.</p>
-<div class="row"><div><label>Projection mode</label><select id="mode"><option value="benchmark">Fantasy Insider benchmark (original)</option><option value="adjusted">Fantasy Insider + NBA Edge minutes adjustment</option><option value="edge">NBA Edge independent (experimental)</option></select></div><div><label>Contest objective</label><select id="objective"><option value="upside">Tournament upside</option><option value="balanced">Balanced</option></select></div></div>
+<div class="row"><div><label>Projection mode</label><select id="mode"><option value="benchmark">Fantasy Insider benchmark (original)</option><option value="adjusted">Fantasy Insider + NBA Edge minutes adjustment</option><option value="matchup">Fantasy Insider + minutes + defensive matchup</option><option value="edge">NBA Edge independent (experimental)</option></select></div><div><label>Contest objective</label><select id="objective"><option value="upside">Tournament upside</option><option value="balanced">Balanced</option></select></div></div>
 <p class="small" id="modelmsg">Benchmark mode is active. Independent mode becomes available when historical inputs are present.</p>
 <p class="small" id="matchupdata">Checking saved matchup data…</p>
 </section>
@@ -70,6 +70,7 @@ function norm(p){const status=String(p.Status||'').trim().toUpperCase().replace(
 
 players=players.map(norm);
 let gameLogs=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeGameLogs')||'[]')}catch(e){return []}})(), logSummary={};
+let defenseByOpponentPosition={},defenseBaselineByPosition={};
 const alias=x=>String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
 function field(o,names){for(const n of names){if(o[n]!==undefined&&o[n]!==''&&o[n]!==null)return o[n];}return 0;}
 function dsFantasy(g){
@@ -113,6 +114,10 @@ function calcLogs(rows){
   logSummary[key]={games:arr.length,last5:avg(last5,'fantasy'),last10:avg(last10,'fantasy'),sampleAvg:avg(sample,'fantasy'),fppm,recentMinutes,sampleMinutes,projectedMinutes,projection};
  }
  players.forEach(p=>{p._edge=logSummary[alias(p.Name)]||null;});
+ const slateByName={};players.forEach(p=>{slateByName[alias(p.Name)]=p;});
+ const against={},baseline={};
+ for(const g of rows){const p=slateByName[alias(field(g,['PLAYER_NAME','Player','Name','player_name','name']))];const opp=String(g.OPPONENT||'').toUpperCase(),pos=p&&String(p.Position||'').toUpperCase(),mins=num(field(g,['MIN','Minutes','minutes']));if(!p||!opp||!pos||mins<=0)continue;const fppm=dsFantasy(g)/mins,key=opp+'|'+pos;if(!against[key])against[key]={sum:0,n:0};against[key].sum+=fppm;against[key].n++;if(!baseline[pos])baseline[pos]={sum:0,n:0};baseline[pos].sum+=fppm;baseline[pos].n++;}
+ defenseByOpponentPosition=against;defenseBaselineByPosition=baseline;
  const matched=players.filter(p=>p._edge&&eligible(p)).length;
  const coverage=players.filter(eligible).length?Math.round(100*matched/players.filter(eligible).length):0;
  const modelMessage=$('modelmsg');if(modelMessage)modelMessage.textContent=`Preliminary rolling model calculated for ${matched} eligible players (${coverage}% coverage) from ${rows.length} game-log rows. Projection = blended fantasy points/minute (last 5, last 10 and retrieved sample) × estimated minutes (70% last 5, 30% sample). Saved history is retained on this device; current feed covers up to 30 days, not a full season, so treat these as experimental estimates.`;
@@ -122,12 +127,10 @@ function eligible(p){return !unavailable(p)&&p.Projection>0}
 function proj(p){
  const mode=$('mode').value;
  if(mode==='edge')return p._edge?p._edge.projection:null;
- if(mode==='adjusted'&&p._edge&&p._edge.games>=5&&p._edge.sampleMinutes>0){
-  const trend=(p._edge.recentMinutes/p._edge.sampleMinutes)-1;
-  const adjustment=Math.max(-0.10,Math.min(0.10,trend*0.35));
-  return p.Projection*(1+adjustment);
- }
- return p.Projection;
+ let value=p.Projection;
+ if((mode==='adjusted'||mode==='matchup')&&p._edge&&p._edge.games>=5&&p._edge.sampleMinutes>0){const trend=(p._edge.recentMinutes/p._edge.sampleMinutes)-1;const adjustment=Math.max(-0.10,Math.min(0.10,trend*0.35));value*=1+adjustment;}
+ if(mode==='matchup'){const pos=String(p.Position||'').toUpperCase(),opp=String(p.Opponent||p.Opp||'').toUpperCase(),a=defenseByOpponentPosition[opp+'|'+pos],b=defenseBaselineByPosition[pos];if(a&&b&&a.n>=8&&b.n>=20&&b.sum>0){const relative=(a.sum/a.n)/(b.sum/b.n)-1;value*=Math.max(0.95,Math.min(1.05,1+relative*0.25));}}
+ return value;
 }
 function render(){
  const q=$('search').value.toLowerCase(),st=$('status').value;
@@ -137,10 +140,7 @@ function render(){
  const zw=$('zerowarn');if(zw){zw.style.display=zero.length?'block':'none';zw.textContent=`Projection check: ${zero.length} players have a zero baseline projection; ${zeroUnmarked.length} are not marked OUT, QUESTIONABLE or DOUBTFUL. Zero-projection players are excluded from lineups. Verify these players before entering.`;}
  $('pool').innerHTML=list.slice(0,180).map(p=>{let pr=proj(p);const statusText=p.Projection<=0?'CHECK: 0 projection':(p.Status||'Unconfirmed');const projectionText=pr===null?'Need inputs':($('mode').value==='adjusted'&&p._edge&&p._edge.games>=5?`${p.Projection.toFixed(1)} → ${pr.toFixed(1)}`:pr.toFixed(1));return `<tr><td>${p.Name}</td><td>${p.Team}</td><td>${p.Price.toLocaleString('en-AU')}</td><td>${projectionText}</td><td>${pr&&p.Price?(pr/(p.Price/1000)).toFixed(2):'—'}</td><td class="${p.Projection<=0?'q':p.Status==='OUT OF GAME'?'out':p.Status==='QUESTIONABLE TO PLAY'?'q':''}">${statusText}</td></tr>`}).join('');
  const edgeReady=players.some(p=>p._edge);
- if($('mode').value==='adjusted'){
-  const adjusted=players.filter(p=>p.Projection>0&&p._edge&&p._edge.games>=5&&p._edge.sampleMinutes>0).length;
-  $('modelmsg').textContent=`Fantasy Insider remains the baseline. NBA Edge applies a conservative minutes-trend adjustment (maximum ±10%) to ${adjusted} players with at least 5 recent games. Players without enough history keep their original projection. This is a first-stage estimate, not yet matchup-adjusted or backtested.`;
- }else $('modelmsg').textContent=edgeReady?'Historical game logs detected. NBA Edge mode can calculate projections for matched players.':'Upload a historical game-log CSV to activate independent projections.';
+ if($('mode').value==='adjusted'||$('mode').value==='matchup'){const adjusted=players.filter(p=>p.Projection>0&&p._edge&&p._edge.games>=5&&p._edge.sampleMinutes>0).length;const matchupCount=players.filter(p=>{const pos=String(p.Position||'').toUpperCase(),opp=String(p.Opponent||p.Opp||'').toUpperCase(),a=defenseByOpponentPosition[opp+'|'+pos],b=defenseBaselineByPosition[pos];return !!(a&&b&&a.n>=8&&b.n>=20);}).length;$('modelmsg').textContent=$('mode').value==='matchup'?('Fantasy Insider baseline + minutes trend (max ±10%) + opponent/position adjustment (max ±5%). '+adjusted+' players have sufficient minutes history; '+matchupCount+' have enough opponent-position samples. Experimental and not yet backtested.'):('Fantasy Insider baseline with minutes trend adjustment (max ±10%) for '+adjusted+' players.');}else $('modelmsg').textContent=edgeReady?'Historical game logs detected. NBA Edge mode can calculate projections for matched players.':'Upload a historical game-log CSV to activate independent projections.';
 }
 function slots(){return ['PG','PG','SG','SG','SF','SF','PF','PF','C']}
 function positions(p){return [p.Position,p.Position2].filter(Boolean)}
