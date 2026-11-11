@@ -167,8 +167,10 @@ function calcLogs(rows){
  const paceTotals={};let leagueSum=0,leagueN=0;for(const g of Object.values(teamGames)){if(g.poss<=0)continue;if(!paceTotals[g.team])paceTotals[g.team]={sum:0,n:0};paceTotals[g.team].sum+=g.poss;paceTotals[g.team].n++;leagueSum+=g.poss;leagueN++;}teamPaceEstimate={};for(const [team,v] of Object.entries(paceTotals))teamPaceEstimate[team]={pace:v.sum/v.n,games:v.n};leaguePaceEstimate=leagueN?leagueSum/leagueN:0;
  const matched=players.filter(p=>p._edge&&eligible(p)).length;
  const coverage=players.filter(eligible).length?Math.round(100*matched/players.filter(eligible).length):0;
- const modelMessage=$('modelmsg');if(modelMessage)modelMessage.textContent=`Preliminary rolling model calculated for ${matched} eligible players (${coverage}% coverage) from ${rows.length} game-log rows. Projection = blended fantasy points/minute (last 5, last 10 and retrieved sample) × estimated minutes (70% last 5, 30% sample). Saved history is retained on this device; current feed covers up to 30 days, not a full season, so treat these as experimental estimates.`;
+ const modelMessage=$('modelmsg');if(modelMessage)modelMessage.textContent=`Preliminary rolling model calculated for ${matched} eligible players (${coverage}% coverage) from ${rows.length} game-log rows. Projection = blended fantasy points/minute (last 5, last 10 and retrieved sample) × estimated minutes (70% last 5, 30% sample). Saved season-to-date history is restored automatically on this device; treat these as experimental estimates until validated against completed slates.`;
 }
+// Restore derived projections and matchup/correlation features from browser-saved game logs on every page load.
+if(gameLogs.length)calcLogs(gameLogs);
 function unavailable(p){const s=String(p.Status||'').toUpperCase();return /\b(QUESTIONABLE|DOUBTFUL|OUT)\b/.test(s)}
 function eligible(p){return !unavailable(p)&&p.Projection>0}
 function proj(p){
