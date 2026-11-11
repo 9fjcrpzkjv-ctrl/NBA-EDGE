@@ -265,7 +265,7 @@ function buildOne(seed, usedSet, seenKeys){
   return !excludedPlayers.has(String(p.ID))&&eligible(p)&&riskCap>0&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&used<Math.min(maxAppearances,riskCap);
  });
  const maxShared=Math.max(0,Math.min(8,Number($('maxshared')?.value||7)));
- const beamWidth=180,branchWidth=22;
+ const beamWidth=180,branchWidth=28;
  function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;return (x%10000)/10000*.65;}
  function slotCandidates(state,pos){
   return pool.filter(p=>can(p,pos)&&!state.players.some(q=>String(q.ID)===String(p.ID))&&state.spent+p.Price<=cap);
