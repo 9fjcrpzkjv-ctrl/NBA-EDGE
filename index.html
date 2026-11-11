@@ -295,12 +295,12 @@ function buildOne(seed, usedSet, seenKeys){
   for(const state of beam){
    const {pos,list}=nextPosition(state);
    if(!pos||!list.length)continue;
-   list.sort((a,b)=>{
-    const ua=lineupUtility(b)-(usedSet.get(String(b.ID))||0)*1.25+noise(b.ID);
-    const ub=lineupUtility(a)-(usedSet.get(String(a.ID))||0)*1.25+noise(a.ID);
-    return ua-ub;
-   });
-   for(const p of list.slice(0,branchWidth)){
+   const utilityOrder=[...list].sort((a,b)=>(lineupUtility(b)-(usedSet.get(String(b.ID))||0)*1.25+noise(b.ID))-(lineupUtility(a)-(usedSet.get(String(a.ID))||0)*1.25+noise(a.ID)));
+   const valueOrder=[...list].sort((a,b)=>(lineupUtility(b)/(b.Price/1000))-(lineupUtility(a)/(a.Price/1000)));
+   // Preserve both raw ceiling leaders and salary-efficient alternatives.
+   const branch=[...new Map([...utilityOrder.slice(0,18),...valueOrder.slice(0,10)].map(p=>[String(p.ID),p])).values()];
+   branch.sort((a,b)=>lineupUtility(b)-lineupUtility(a));
+   for(const p of branch.slice(0,branchWidth)){
     const remaining={...state.remaining};remaining[pos]--;
     const next={players:[...state.players,p],remaining,spent:state.spent+p.Price,score:state.score+proj(p),rankScore:state.rankScore+lineupUtility(p)};
     const overlapsTooHigh=generated.some(existing=>existing.players.filter(q=>next.players.some(r=>String(r.ID)===String(q.ID))).length>maxShared);
