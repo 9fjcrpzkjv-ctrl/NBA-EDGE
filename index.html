@@ -221,7 +221,7 @@ function buildOne(seed, usedSet, seenKeys){
  const required={PG:2,SG:2,SF:2,PF:2,C:1};
  const cap=num($('cap').value)||100000;
  const targetCount=Math.max(1,Number($('count').value)||20),maxExposure=Math.max(1,Math.min(100,Number($('maxexposure')?.value||40))),maxAppearances=Math.max(1,Math.ceil(targetCount*maxExposure/100));
- const pool=players.filter(p=>!excludedPlayers.has(String(p.ID))&&eligible(p)&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&(usedSet.get(String(p.ID))||0)<maxAppearances);
+ const pool=players.filter(p=>!excludedPlayers.has(String(p.ID))&&eligible(p)&&!(p._edge&&p._edge.games>=3&&p._edge.zeroRecent>=2)&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&(usedSet.get(String(p.ID))||0)<maxAppearances);
  let nodes=0;
  function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;const spread=$('objective').value==='balanced'?1.5:5;return (x%10000)/10000*spread}
  function search(picked,remaining,spent,score,rankScore){
@@ -313,7 +313,8 @@ $('historydata').addEventListener('click',async()=>{
       const [fgm,fga]=pair(obj.FG),[fg3m,fg3a]=pair(obj['3PT']),[ftm,fta]=pair(obj.FT);
       const min=String(obj.MIN||'0');obj.MIN=min.includes(':')?(Number(min.split(':')[0])+(Number(min.split(':')[1])||0)/60):Number(min)||0;
       Object.assign(obj,{PTS:Number(obj.PTS)||0,FGM:fgm,FGA:fga,FTM:ftm,FTA:fta,FG3M:fg3m,REB:Number(obj.REB)||0,AST:Number(obj.AST)||0,STL:Number(obj.STL)||0,BLK:Number(obj.BLK)||0,TOV:Number(obj.TO)||0});
-      if(obj.PLAYER_NAME&&obj.MIN>0)rows.push(obj);
+      // Keep zero-minute/DNP rows: rotation-risk analysis needs appearances that produced no minutes.
+      if(obj.PLAYER_NAME)rows.push(obj);
      }
     }
     checked++;
