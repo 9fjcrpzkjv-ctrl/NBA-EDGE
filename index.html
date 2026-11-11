@@ -192,11 +192,11 @@ function buildOne(seed, usedSet, seenKeys){
  const pool=players.filter(p=>!excludedPlayers.has(String(p.ID))&&eligible(p)&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0);
  let nodes=0;
  function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;const spread=$('objective').value==='balanced'?1.5:5;return (x%10000)/10000*spread}
- function search(picked,remaining,spent,score){
+ function search(picked,remaining,spent,score,rankScore){
   if(++nodes>12000)return null;
   if(Object.values(remaining).every(v=>v===0)){
    const key=picked.map(p=>String(p.ID)).sort().join('-');
-   return seenKeys.has(key)?null:{players:picked,salary:spent,score,key};
+   return seenKeys.has(key)?null:{players:picked,salary:spent,score,rankScore,key};
   }
   const available=pool.filter(p=>!picked.some(q=>String(q.ID)===String(p.ID))&&spent+p.Price<=cap);
   const slotsLeft=Object.values(remaining).reduce((a,b)=>a+b,0);
@@ -217,21 +217,21 @@ function buildOne(seed, usedSet, seenKeys){
   });
   for(const p of candidates.slice(0,45)){
    const next={...remaining};next[chosen]--;
-   const result=search([...picked,p],next,spent+p.Price,score+proj(p));
+   const result=search([...picked,p],next,spent+p.Price,score+proj(p),rankScore+lineupUtility(p));
    if(result)return result;
   }
   return null;
  }
- return search([],{...required},0,0);
+ return search([],{...required},0,0,0);
 }
 function generate(){
  if(['edge','edgeMatchup'].includes($('mode').value)&&!players.some(p=>p._edge)){alert('Retrieve historical NBA game logs first.');return}
  generated=[];let exposure=new Map(),seenKeys=new Set(),tries=0,n=Number($('count').value);
  while(generated.length<n&&tries<n*150){tries++;let l=buildOne(tries,exposure,seenKeys);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
- generated.sort((a,b)=>b.score-a.score);
+ generated.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
  const blocked=players.filter(unavailable).length,manual=excludedPlayers.size;
  $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Excluded ${blocked} questionable, doubtful or out players plus ${manual} manually excluded. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found. Eligible players: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check the salary cap and position eligibility, or try Benchmark mode.`;
- $('lineups').innerHTML=generated.map((l,i)=>`<div class="lineup"><div class="lineuphead"><b>${i===0?'⭐ Suggested $15 entry':'Virtual lineup '+(i+1)}</b><span class="badge">${l.score.toFixed(1)} proj.</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} <span class="pill">${p.Position}${p.Position2?'/'+p.Position2:''}</span></span><span>$${p.Price.toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<div class="small" style="margin-top:8px">Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${((num($('cap').value)||100000)-l.salary).toLocaleString('en-AU')}</div></div>`).join('');
+ $('lineups').innerHTML=generated.map((l,i)=>`<div class="lineup"><div class="lineuphead"><b>${i===0?'⭐ Suggested $15 entry':'Virtual lineup '+(i+1)}</b><span class="badge">${l.score.toFixed(1)} proj. · ${l.rankScore.toFixed(1)} ${$("objective").value==="upside"?"upside":"balanced"} score</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} <span class="pill">${p.Position}${p.Position2?'/'+p.Position2:''}</span></span><span>$${p.Price.toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<div class="small" style="margin-top:8px">Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${((num($('cap').value)||100000)-l.salary).toLocaleString('en-AU')}</div></div>`).join('');
 }
 function parseCSV(text){
  text=String(text||'').replace(/^\uFEFF/,'');
