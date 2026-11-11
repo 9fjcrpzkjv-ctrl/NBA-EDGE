@@ -265,7 +265,7 @@ function buildOne(seed, usedSet, seenKeys){
   return !excludedPlayers.has(String(p.ID))&&eligible(p)&&riskCap>0&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&used<Math.min(maxAppearances,riskCap);
  });
  const maxShared=Math.max(0,Math.min(8,Number($('maxshared')?.value||7)));
- const beamWidth=180,branchWidth=28;
+ const beamWidth=48,branchWidth=14;
  function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;return (x%10000)/10000*.65;}
  function slotCandidates(state,pos){
   return pool.filter(p=>can(p,pos)&&!state.players.some(q=>String(q.ID)===String(p.ID))&&state.spent+p.Price<=cap);
@@ -299,7 +299,7 @@ function buildOne(seed, usedSet, seenKeys){
    const utilityOrder=[...list].sort((a,b)=>(lineupUtility(b)-(usedSet.get(String(b.ID))||0)*1.25+noise(b.ID))-(lineupUtility(a)-(usedSet.get(String(a.ID))||0)*1.25+noise(a.ID)));
    const valueOrder=[...list].sort((a,b)=>(lineupUtility(b)/(b.Price/1000))-(lineupUtility(a)/(a.Price/1000)));
    // Preserve both raw ceiling leaders and salary-efficient alternatives.
-   const branch=[...new Map([...utilityOrder.slice(0,18),...valueOrder.slice(0,10)].map(p=>[String(p.ID),p])).values()];
+   const branch=[...new Map([...utilityOrder.slice(0,9),...valueOrder.slice(0,5)].map(p=>[String(p.ID),p])).values()];
    branch.sort((a,b)=>lineupUtility(b)-lineupUtility(a));
    for(const p of branch.slice(0,branchWidth)){
     const remaining={...state.remaining};remaining[pos]--;
@@ -339,13 +339,14 @@ function buildOne(seed, usedSet, seenKeys){
  completed.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
  return completed[0]||null;
 }
+
 function generate(){
  if(['edge','edgeMatchup'].includes($('mode').value)&&!players.some(p=>p._edge)){alert('Retrieve historical NBA game logs first.');return}
  generated=[];let exposure=new Map(),seenKeys=new Set(),tries=0,n=Number($('count').value);
- while(generated.length<n&&tries<n*150){tries++;let l=buildOne(tries,exposure,seenKeys);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
+ while(generated.length<n&&tries<n*8){tries++;let l=buildOne(tries,exposure,seenKeys);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
  generated.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
  const blocked=players.filter(unavailable).length,manual=excludedPlayers.size;
- $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Excluded ${blocked} questionable, doubtful or out players plus ${manual} manually excluded. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found. Eligible players: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check the salary cap and position eligibility, or try Benchmark mode.`;
+ $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Excluded ${blocked} questionable, doubtful or out players plus ${manual} manually excluded. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found after ${tries} attempts. Eligible: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check each position has enough eligible players, salary cap and exposure limits.`;
  const expMap=new Map();generated.forEach(l=>l.players.forEach(p=>{const id=String(p.ID),old=expMap.get(id);expMap.set(id,{player:p,name:p.Name,count:(old?.count||0)+1});}));
  const expRows=[...expMap.values()].sort((a,b)=>b.count-a.count);
  const riskRows=expRows.map(x=>{const e=x.player._edge;let level='LOW DATA',reason='Insufficient history',mins='—';if(e&&e.games>=3){mins=e.recentMinutes.toFixed(1);if(e.zeroRecent>=2){level='HIGH';reason=e.zeroRecent+' zero-minute games in last 5';}else if(e.zeroRecent===1){level='ELEVATED';reason='1 zero-minute game in last 5';}else if(e.recentMinutes<8){level='HIGH';reason='Low recent minutes';}else if(e.recentMinutes<12&&e.sampleMinutes>=18){level='ELEVATED';reason='Recent minutes below longer-term role';}else{level='LOW';reason='No major minutes warning';}}return {name:x.name,count:x.count,level,reason,mins};}).sort((a,b)=>a.level.localeCompare(b.level)||b.count-a.count);
