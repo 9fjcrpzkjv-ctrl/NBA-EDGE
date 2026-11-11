@@ -359,6 +359,7 @@ $('historydata').addEventListener('click',async()=>{
   gameLogs=rows;try{localStorage.setItem('nbaEdgeGameLogs',JSON.stringify(gameLogs));}catch(e){m.textContent='History retrieved but could not be saved on this device (browser storage may be full).';}calcLogs(gameLogs);
   m.textContent='Retrieved '+rows.length+' player game-log rows from '+checked+' completed games across '+checkedDates.length+' dates (current-season-to-date search, up to 500 games) ('+errors+' game summaries unavailable). '+players.filter(p=>p._edge&&eligible(p)).length+' players matched to your uploaded slate. Pair correlations use separate minimums: 5 shared games for teammates and 3 for opponents, with stronger shrinkage for opponent samples. Select NBA Edge independent mode to use these preliminary historical projections.';
   render();
+  const matchupStatus=$('matchupdata');if(matchupStatus){const tagged=gameLogs.filter(g=>g.TEAM&&g.OPPONENT).length;matchupStatus.textContent=`Saved matchup data check: ${tagged} of ${gameLogs.length} historical rows include both team and opponent.`;}
  }catch(err){m.textContent='Could not retrieve game logs: '+(err.message||'unknown error')+'. Existing lineups are unchanged.';}
  finally{b.disabled=false;}
 });
