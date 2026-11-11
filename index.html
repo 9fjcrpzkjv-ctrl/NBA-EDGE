@@ -273,12 +273,11 @@ function buildOne(seed, usedSet, seenKeys){
  function feasible(state){
   const slots=Object.entries(state.remaining).filter(([,n])=>n>0);
   if(!slots.length)return true;
-  let minSpend=0;
-  for(const [pos,n] of slots){
-   const prices=pool.filter(p=>can(p,pos)&&!state.players.some(q=>String(q.ID)===String(p.ID))).map(p=>p.Price).sort((a,b)=>a-b);
-   if(prices.length<n)return false;
-   minSpend+=prices.slice(0,n).reduce((a,b)=>a+b,0);
-  }
+  // Safe lower bound: use the cheapest distinct remaining players overall.
+  // Position-by-position minima can double-count multi-position players.
+  const prices=pool.filter(p=>!state.players.some(q=>String(q.ID)===String(p.ID))).map(p=>p.Price).sort((a,b)=>a-b);
+  if(prices.length<slotsLeft)return false;
+  const minSpend=prices.slice(0,slotsLeft).reduce((a,b)=>a+b,0);
   return state.spent+minSpend<=cap;
  }
  function nextPosition(state){
@@ -304,7 +303,8 @@ function buildOne(seed, usedSet, seenKeys){
    for(const p of list.slice(0,branchWidth)){
     const remaining={...state.remaining};remaining[pos]--;
     const next={players:[...state.players,p],remaining,spent:state.spent+p.Price,score:state.score+proj(p),rankScore:state.rankScore+lineupUtility(p)};
-    if(!feasible(next))continue;
+    const overlapsTooHigh=generated.some(existing=>existing.players.filter(q=>next.players.some(r=>String(r.ID)===String(q.ID))).length>maxShared);
+    if(overlapsTooHigh||!feasible(next))continue;
     // A small salary-efficiency term breaks ties without forcing salary spend.
     const slotsLeft=Object.values(remaining).reduce((a,b)=>a+b,0);
     const salaryPace=cap*(9-slotsLeft)/9;
