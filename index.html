@@ -250,47 +250,93 @@ function lineupCorrelationProfile(picked){const games={};for(const p of picked){
 function lineupCorrelationAdjustment(picked,baseScore){if($('rankingmode')?.value!=='leverage'||!baseScore)return 0;return baseScore*lineupCorrelationProfile(picked).rate;}
 function can(p,s){return positions(p).includes(s)}
 function buildOne(seed, usedSet, seenKeys){
+ // Beam search evaluates many partial rosters instead of stopping at the first
+ // valid DFS combination. Each beam state is a distinct partial lineup.
  const required={PG:2,SG:2,SF:2,PF:2,C:1};
  const cap=num($('cap').value)||100000;
- const targetCount=Math.max(1,Number($('count').value)||20),maxExposure=Math.max(1,Math.min(100,Number($('maxexposure')?.value||40))),maxAppearances=Math.max(1,Math.ceil(targetCount*maxExposure/100));
- const pool=players.filter(p=>{const e=p._edge,used=usedSet.get(String(p.ID))||0;let riskCap=maxAppearances;if(!e||e.games<3)riskCap=Math.max(1,Math.floor(targetCount*.05));else if(e.zeroRecent>=2)riskCap=0;else if(e.zeroRecent>=1||e.recentMinutes<8)riskCap=Math.max(1,Math.floor(targetCount*.10));return !excludedPlayers.has(String(p.ID))&&eligible(p)&&riskCap>0&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&used<Math.min(maxAppearances,riskCap);});
- let nodes=0;
- function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;const spread=$('objective').value==='balanced'?1.5:5;return (x%10000)/10000*spread}
- function search(picked,remaining,spent,score,rankScore){
-  if(++nodes>12000)return null;
-  if(Object.values(remaining).every(v=>v===0)){
-   const key=picked.map(p=>String(p.ID)).sort().join('-');
-   const maxShared=Math.max(0,Math.min(8,Number($('maxshared')?.value||7)));
-   const overlaps=generated.map(existing=>existing.players.filter(p=>picked.some(q=>String(q.ID)===String(p.ID))).length);
-   if(overlaps.some(v=>v>maxShared))return null;
-   const correlation=lineupCorrelationProfile(picked);return seenKeys.has(key)?null:{players:picked,salary:spent,score,rankScore:rankScore+lineupLeverageAdjustment(picked,rankScore)+lineupCorrelationAdjustment(picked,rankScore),correlation,key};
-  }
-  const available=pool.filter(p=>!picked.some(q=>String(q.ID)===String(p.ID))&&spent+p.Price<=cap);
-  const slotsLeft=Object.values(remaining).reduce((a,b)=>a+b,0);
-  if(available.length<slotsLeft)return null;
-  const cheapest=available.map(p=>p.Price).sort((a,b)=>a-b);
-  if(spent+cheapest.slice(0,slotsLeft).reduce((a,b)=>a+b,0)>cap)return null;
-  let chosen=null,candidates=null;
-  for(const pos of Object.keys(remaining)){
-   if(!remaining[pos])continue;
-   const list=available.filter(p=>can(p,pos));
-   if(!candidates||list.length<candidates.length){chosen=pos;candidates=list;}
-  }
-  if(!candidates||!candidates.length)return null;
-  candidates.sort((a,b)=>{
-   const nextA=[...picked,a],nextB=[...picked,b],baseA=rankScore+lineupUtility(a),baseB=rankScore+lineupUtility(b);
-   const ra=baseA+lineupLeverageAdjustment(nextA,baseA)+lineupCorrelationAdjustment(nextA,baseA)-(usedSet.get(String(a.ID))||0)*2+noise(a.ID);
-   const rb=baseB+lineupLeverageAdjustment(nextB,baseB)+lineupCorrelationAdjustment(nextB,baseB)-(usedSet.get(String(b.ID))||0)*2+noise(b.ID);
-   return rb-ra;
-  });
-  for(const p of candidates.slice(0,45)){
-   const next={...remaining};next[chosen]--;
-   const result=search([...picked,p],next,spent+p.Price,score+proj(p),rankScore+lineupUtility(p));
-   if(result)return result;
-  }
-  return null;
+ const targetCount=Math.max(1,Number($('count').value)||20);
+ const maxExposure=Math.max(1,Math.min(100,Number($('maxexposure')?.value||40)));
+ const maxAppearances=Math.max(1,Math.ceil(targetCount*maxExposure/100));
+ const pool=players.filter(p=>{
+  const e=p._edge,used=usedSet.get(String(p.ID))||0;let riskCap=maxAppearances;
+  if(!e||e.games<3)riskCap=Math.max(1,Math.floor(targetCount*.05));
+  else if(e.zeroRecent>=2)riskCap=0;
+  else if(e.zeroRecent>=1||e.recentMinutes<8)riskCap=Math.max(1,Math.floor(targetCount*.10));
+  return !excludedPlayers.has(String(p.ID))&&eligible(p)&&riskCap>0&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&used<Math.min(maxAppearances,riskCap);
+ });
+ const maxShared=Math.max(0,Math.min(8,Number($('maxshared')?.value||7)));
+ const beamWidth=180,branchWidth=22;
+ function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;return (x%10000)/10000*.65;}
+ function slotCandidates(state,pos){
+  return pool.filter(p=>can(p,pos)&&!state.players.some(q=>String(q.ID)===String(p.ID))&&state.spent+p.Price<=cap);
  }
- return search([],{...required},0,0,0);
+ function feasible(state){
+  const slots=Object.entries(state.remaining).filter(([,n])=>n>0);
+  if(!slots.length)return true;
+  let minSpend=0;
+  for(const [pos,n] of slots){
+   const prices=pool.filter(p=>can(p,pos)&&!state.players.some(q=>String(q.ID)===String(p.ID))).map(p=>p.Price).sort((a,b)=>a-b);
+   if(prices.length<n)return false;
+   minSpend+=prices.slice(0,n).reduce((a,b)=>a+b,0);
+  }
+  return state.spent+minSpend<=cap;
+ }
+ function nextPosition(state){
+  let chosen=null,best=null;
+  for(const [pos,n] of Object.entries(state.remaining)){
+   if(!n)continue;
+   const list=slotCandidates(state,pos);
+   if(!best||list.length<best.length){chosen=pos;best=list;}
+  }
+  return {pos:chosen,list:best||[]};
+ }
+ let beam=[{players:[],remaining:{...required},spent:0,score:0,rankScore:0}];
+ for(let depth=0;depth<9;depth++){
+  const expanded=[];
+  for(const state of beam){
+   const {pos,list}=nextPosition(state);
+   if(!pos||!list.length)continue;
+   list.sort((a,b)=>{
+    const ua=lineupUtility(b)-(usedSet.get(String(b.ID))||0)*1.25+noise(b.ID);
+    const ub=lineupUtility(a)-(usedSet.get(String(a.ID))||0)*1.25+noise(a.ID);
+    return ua-ub;
+   });
+   for(const p of list.slice(0,branchWidth)){
+    const remaining={...state.remaining};remaining[pos]--;
+    const next={players:[...state.players,p],remaining,spent:state.spent+p.Price,score:state.score+proj(p),rankScore:state.rankScore+lineupUtility(p)};
+    if(!feasible(next))continue;
+    // A small salary-efficiency term breaks ties without forcing salary spend.
+    const slotsLeft=Object.values(remaining).reduce((a,b)=>a+b,0);
+    const salaryPace=cap*(9-slotsLeft)/9;
+    const pacePenalty=Math.max(0,next.spent-salaryPace)*.000035;
+    next.searchScore=next.rankScore-pacePenalty;
+    expanded.push(next);
+   }
+  }
+  if(!expanded.length)return null;
+  expanded.sort((a,b)=>b.searchScore-a.searchScore);
+  const dedup=new Set(),nextBeam=[];
+  for(const state of expanded){
+   const key=state.players.map(p=>String(p.ID)).sort().join('-');
+   if(dedup.has(key))continue;
+   dedup.add(key);nextBeam.push(state);
+   if(nextBeam.length>=beamWidth)break;
+  }
+  beam=nextBeam;
+ }
+ const completed=[];
+ for(const state of beam){
+  if(Object.values(state.remaining).some(v=>v!==0))continue;
+  const key=state.players.map(p=>String(p.ID)).sort().join('-');
+  if(seenKeys.has(key))continue;
+  const overlaps=generated.map(existing=>existing.players.filter(p=>state.players.some(q=>String(q.ID)===String(p.ID))).length);
+  if(overlaps.some(v=>v>maxShared))continue;
+  const correlation=lineupCorrelationProfile(state.players);
+  const rankScore=state.rankScore+lineupLeverageAdjustment(state.players,state.rankScore)+lineupCorrelationAdjustment(state.players,state.rankScore);
+  completed.push({players:state.players,salary:state.spent,score:state.score,rankScore,correlation,key});
+ }
+ completed.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
+ return completed[0]||null;
 }
 function generate(){
  if(['edge','edgeMatchup'].includes($('mode').value)&&!players.some(p=>p._edge)){alert('Retrieve historical NBA game logs first.');return}
