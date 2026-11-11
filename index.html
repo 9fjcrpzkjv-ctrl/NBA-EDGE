@@ -307,12 +307,12 @@ function buildFieldThresholds(seed){
  if(pool.length<9)return [];
  const weights=pool.map(p=>{const own=ownershipEstimate(p);const projection=Math.max(1,proj(p));const value=projection/(p.Price/1000);return Number.isFinite(own)?Math.max(.2,own):Math.pow(projection,1.05)*Math.pow(Math.max(.1,value),.25);});
  const rng=seededRandom(seed+7919),scores=[];
- for(let n=0;n<1400;n++){const used=new Set();let total=0;for(let k=0;k<9;k++){let sum=0;for(let i=0;i<pool.length;i++)if(!used.has(i))sum+=weights[i];if(!sum)break;let pick=rng()*sum,index=-1;for(let i=0;i<pool.length;i++){if(used.has(i))continue;pick-=weights[i];if(pick<=0){index=i;break;}}if(index<0)index=pool.findIndex((p,i)=>!used.has(i));if(index<0)break;used.add(index);total+=playerOutcome(pool[index],rng);}if(used.size===9)scores.push(total);}
+ for(let n=0;n<350;n++){const used=new Set();let total=0;for(let k=0;k<9;k++){let sum=0;for(let i=0;i<pool.length;i++)if(!used.has(i))sum+=weights[i];if(!sum)break;let pick=rng()*sum,index=-1;for(let i=0;i<pool.length;i++){if(used.has(i))continue;pick-=weights[i];if(pick<=0){index=i;break;}}if(index<0)index=pool.findIndex((p,i)=>!used.has(i));if(index<0)break;used.add(index);total+=playerOutcome(pool[index],rng);}if(used.size===9)scores.push(total);}
  return scores.sort((a,b)=>a-b);
 }
 function lineupTournamentEvaluation(picked,seed,fieldThresholds){
  const rng=seededRandom(seed+104729),samples=[];
- for(let i=0;i<220;i++){let total=0;for(const p of picked)total+=playerOutcome(p,rng);samples.push(total);}
+ for(let i=0;i<80;i++){let total=0;for(const p of picked)total+=playerOutcome(p,rng);samples.push(total);}
  samples.sort((a,b)=>a-b);
  const quantile=q=>fieldThresholds.length?fieldThresholds[Math.min(fieldThresholds.length-1,Math.floor(q*(fieldThresholds.length-1)))]:0;
  const top1=fieldThresholds.length?samples.filter(x=>x>=quantile(.99)).length/samples.length:0;
@@ -349,7 +349,7 @@ function buildOne(seed, usedSet, seenKeys, fieldThresholds){
   return !excludedPlayers.has(String(p.ID))&&eligible(p)&&riskCap>0&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&used<Math.min(maxAppearances,riskCap);
  });
  const maxShared=Math.max(0,Math.min(8,Number($('maxshared')?.value||7)));
- const beamWidth=72,branchWidth=18;
+ const beamWidth=28,branchWidth=9;
  function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;return (x%10000)/10000*.65;}
  function slotCandidates(state,pos){
   return pool.filter(p=>can(p,pos)&&!state.players.some(q=>String(q.ID)===String(p.ID))&&state.spent+p.Price<=cap);
@@ -383,7 +383,7 @@ function buildOne(seed, usedSet, seenKeys, fieldThresholds){
    const utilityOrder=[...list].sort((a,b)=>((proj(b)||0)*.55+playerVolatility(b,proj(b)||0)*.65+lineupUtility(b)*.25-(usedSet.get(String(b.ID))||0)*1.25+noise(b.ID))-((proj(a)||0)*.55+playerVolatility(a,proj(a)||0)*.65+lineupUtility(a)*.25-(usedSet.get(String(a.ID))||0)*1.25+noise(a.ID)));
    const valueOrder=[...list].sort((a,b)=>(((proj(b)||0)+playerVolatility(b,proj(b)||0)*.8)/(b.Price/1000))-(((proj(a)||0)+playerVolatility(a,proj(a)||0)*.8)/(a.Price/1000)));
    // Preserve both raw ceiling leaders and salary-efficient alternatives.
-   const branch=[...new Map([...utilityOrder.slice(0,12),...valueOrder.slice(0,6)].map(p=>[String(p.ID),p])).values()];
+   const branch=[...new Map([...utilityOrder.slice(0,6),...valueOrder.slice(0,3)].map(p=>[String(p.ID),p])).values()];
    branch.sort((a,b)=>((proj(b)||0)*.55+playerVolatility(b,proj(b)||0)*.65+lineupUtility(b)*.25)-((proj(a)||0)*.55+playerVolatility(a,proj(a)||0)*.65+lineupUtility(a)*.25));
    for(const p of branch.slice(0,branchWidth)){
     const remaining={...state.remaining};remaining[pos]--;
