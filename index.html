@@ -64,7 +64,10 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 </section>
 <section class="card"><h2>6. Generate lineups</h2>
 <p class="small">Roster template: 2 PG · 2 SG · 2 SF · 2 PF · 1 C. Players with multi-position eligibility can fill either slot.</p>
-<div style="margin:10px 0"><label>Lineup ranking</label><select id="rankingmode"><option value="standard">Standard tournament upside</option><option value="leverage">Ownership leverage (experimental)</option></select></div><button id="generate">Generate lineups</button>
+<div style="margin:10px 0"><label>Lineup ranking</label><select id="rankingmode"><option value="standard">Standard tournament upside</option><option value="leverage">Ownership leverage (experimental)</option></select></div>
+<div class="row"><div><label>Maximum player exposure (%)</label><select id="maxexposure"><option value="25">25%</option><option value="30">30%</option><option value="40" selected>40%</option><option value="50">50%</option><option value="60">60%</option><option value="75">75%</option><option value="100">100%</option></select></div><div><label>Maximum players shared between lineups</label><select id="maxshared"><option value="5">5 (more variety)</option><option value="6">6</option><option value="7" selected>7 (balanced)</option><option value="8">8 (more overlap)</option></select></div></div>
+<div id="exposurereport" class="small"></div>
+<button id="generate">Generate lineups</button>
 <div class="small" id="genmsg" style="margin-top:9px">Generate 20 candidate lineups to compare one paid entry against 19 virtual entries.</div>
 <div id="lineups"></div>
 </section>
@@ -198,13 +201,17 @@ function can(p,s){return positions(p).includes(s)}
 function buildOne(seed, usedSet, seenKeys){
  const required={PG:2,SG:2,SF:2,PF:2,C:1};
  const cap=num($('cap').value)||100000;
- const pool=players.filter(p=>!excludedPlayers.has(String(p.ID))&&eligible(p)&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0);
+ const targetCount=Math.max(1,Number($('count').value)||20),maxExposure=Math.max(1,Math.min(100,Number($('maxexposure')?.value||40))),maxAppearances=Math.max(1,Math.ceil(targetCount*maxExposure/100));
+ const pool=players.filter(p=>!excludedPlayers.has(String(p.ID))&&eligible(p)&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&(usedSet.get(String(p.ID))||0)<maxAppearances);
  let nodes=0;
  function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;const spread=$('objective').value==='balanced'?1.5:5;return (x%10000)/10000*spread}
  function search(picked,remaining,spent,score,rankScore){
   if(++nodes>12000)return null;
   if(Object.values(remaining).every(v=>v===0)){
    const key=picked.map(p=>String(p.ID)).sort().join('-');
+   const maxShared=Math.max(0,Math.min(8,Number($('maxshared')?.value||7)));
+   const overlaps=generated.map(existing=>existing.players.filter(p=>picked.some(q=>String(q.ID)===String(p.ID))).length);
+   if(overlaps.some(v=>v>maxShared))return null;
    return seenKeys.has(key)?null:{players:picked,salary:spent,score,rankScore,key};
   }
   const available=pool.filter(p=>!picked.some(q=>String(q.ID)===String(p.ID))&&spent+p.Price<=cap);
@@ -240,6 +247,9 @@ function generate(){
  generated.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
  const blocked=players.filter(unavailable).length,manual=excludedPlayers.size;
  $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Excluded ${blocked} questionable, doubtful or out players plus ${manual} manually excluded. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found. Eligible players: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check the salary cap and position eligibility, or try Benchmark mode.`;
+ const expMap=new Map();generated.forEach(l=>l.players.forEach(p=>expMap.set(String(p.ID),{name:p.Name,count:(expMap.get(String(p.ID))?.count||0)+1})));
+ const expRows=[...expMap.values()].sort((a,b)=>b.count-a.count);
+ const expEl=$('exposurereport');if(expEl)expEl.innerHTML=generated.length?'<b>Player exposure</b><br>'+expRows.map(p=>p.name+': '+p.count+'/'+generated.length+' lineups ('+Math.round(p.count/generated.length*100)+'%)').join(' · ')+'<br><span class="small">Maximum allowed: '+Math.ceil(n*Math.max(1,Math.min(100,Number($('maxexposure').value||40)))/100)+' appearances per player. Maximum shared players per pair: '+$('maxshared').value+'.</span>':'No exposure report yet.';
  $('lineups').innerHTML=generated.map((l,i)=>`<div class="lineup"><div class="lineuphead"><b>${i===0?'⭐ Suggested $15 entry':'Virtual lineup '+(i+1)}</b><span class="badge">${l.score.toFixed(1)} proj. · ${l.rankScore.toFixed(1)} ${$("objective").value==="upside"?"upside":"balanced"} score</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} <span class="pill">${p.Position}${p.Position2?'/'+p.Position2:''}</span></span><span>$${p.Price.toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<div class="small" style="margin-top:8px">Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${((num($('cap').value)||100000)-l.salary).toLocaleString('en-AU')}</div></div>`).join('');
 }
 function parseCSV(text){
