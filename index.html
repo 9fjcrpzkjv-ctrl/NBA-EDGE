@@ -342,47 +342,56 @@ function buildOne(seed,usedSet,seenKeys,fieldThresholds){
   else if(e.zeroRecent>=1||e.recentMinutes<8)riskCap=Math.max(1,Math.floor(targetCount*.10));
   return !excludedPlayers.has(String(p.ID))&&eligible(p)&&riskCap>0&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&used<Math.min(maxAppearances,riskCap);
  });
- let nodes=0;const nodeLimit=1800;
- function candidateScore(p){
-  const projection=Math.max(0,proj(p)||0),sd=playerVolatility(p,projection);
-  const own=ownershipEstimate(p),leverage=Number.isFinite(own)?Math.max(-.12,Math.min(.12,(18-own)*.004)):0;
-  return (projection*.72+sd*.55)*rotationReliability(p)*(1+leverage);
+ let nodes=0,best=null,bestProjection=-Infinity,bestTie=-Infinity;
+ const nodeLimit=4200;
+ function tieScore(picked){
+  let ceiling=0,leverage=0;
+  for(const p of picked){const pr=Math.max(0,proj(p)||0);ceiling+=playerVolatility(p,pr);const own=ownershipEstimate(p);if(Number.isFinite(own))leverage+=Math.max(-.12,Math.min(.12,(18-own)*.004));}
+  return ceiling*.08+leverage;
  }
- function search(picked,remaining,spent){
-  if(++nodes>nodeLimit)return null;
+ function search(picked,remaining,spent,projection){
+  if(++nodes>nodeLimit)return;
   const left=Object.values(remaining).reduce((a,b)=>a+b,0);
-  if(left===0)return {players:picked,salary:spent};
+  if(left===0){
+   const key=picked.map(p=>String(p.ID)).sort().join('-');
+   if(seenKeys.has(key))return;
+   const overlap=generated.some(old=>old.players.filter(q=>picked.some(x=>String(x.ID)===String(q.ID))).length>maxShared);
+   if(overlap)return;
+   const tie=tieScore(picked);
+   if(projection>bestProjection+1e-8||(Math.abs(projection-bestProjection)<=1e-8&&tie>bestTie)){best={players:picked,salary:spent};bestProjection=projection;bestTie=tie;}
+   return;
+  }
+  if(best&&pool.length>=left){
+   const available=pool.filter(q=>!picked.some(x=>String(x.ID)===String(q.ID))).map(q=>Math.max(0,proj(q)||0)).sort((a,b)=>b-a).slice(0,left);
+   if(available.length===left&&projection+available.reduce((a,b)=>a+b,0)<bestProjection-1e-8)return;
+  }
   let chosen=null,candidates=null;
   for(const [pos,count] of Object.entries(remaining)){
    if(!count)continue;
    const list=pool.filter(p=>can(p,pos)&&spent+p.Price<=cap&&!picked.some(q=>String(q.ID)===String(p.ID)));
    if(!candidates||list.length<candidates.length){chosen=pos;candidates=list;}
-   if(!list.length)return null;
+   if(!list.length)return;
   }
-  const ranked=candidates.map(p=>({p,s:candidateScore(p)})).sort((a,b)=>b.s-a.s);
-  const jitter=seed%Math.max(1,ranked.length);
-  const ordered=ranked.slice(jitter).concat(ranked.slice(0,jitter));
-  for(const item of ordered.slice(0,14)){
-   const p=item.p,nextRemaining={...remaining};nextRemaining[chosen]--;
-   const nextPicked=[...picked,p],slotsLeft=left-1;
+  candidates.sort((a,b)=>(proj(b)||0)-(proj(a)||0)||playerVolatility(b,proj(b)||0)-playerVolatility(a,proj(a)||0));
+  for(const p of candidates.slice(0,16)){
+   if(nodes>=nodeLimit)break;
+   const nextRemaining={...remaining};nextRemaining[chosen]--;
+   const nextPicked=[...picked,p],slotsLeft=left-1,nextSpent=spent+p.Price;
    if(slotsLeft){
     const cheapest=pool.filter(q=>!nextPicked.some(x=>String(x.ID)===String(q.ID))).map(q=>q.Price).sort((a,b)=>a-b).slice(0,slotsLeft);
-    if(cheapest.length<slotsLeft||spent+p.Price+cheapest.reduce((a,b)=>a+b,0)>cap)continue;
+    if(cheapest.length<slotsLeft||nextSpent+cheapest.reduce((a,b)=>a+b,0)>cap)continue;
    }
    const overlap=generated.some(old=>old.players.filter(q=>nextPicked.some(x=>String(x.ID)===String(q.ID))).length>maxShared);
    if(overlap)continue;
-   const found=search(nextPicked,nextRemaining,spent+p.Price);
-   if(found)return found;
+   search(nextPicked,nextRemaining,nextSpent,projection+(proj(p)||0));
   }
-  return null;
  }
- const found=search([],{...required},0);
- if(!found)return null;
- const key=found.players.map(p=>String(p.ID)).sort().join('-');
- if(seenKeys.has(key))return null;
- const correlation=lineupCorrelationProfile(found.players);
- const evaluation=lineupTournamentEvaluation(found.players,seed,[]);
- return {players:found.players,salary:found.salary,score:found.players.reduce((s,p)=>s+(proj(p)||0),0),rankScore:evaluation.rankScore,correlation,tournament:evaluation,key};
+ search([],{...required},0,0);
+ if(!best)return null;
+ const key=best.players.map(p=>String(p.ID)).sort().join('-');
+ const correlation=lineupCorrelationProfile(best.players);
+ const evaluation=lineupTournamentEvaluation(best.players,seed,[]);
+ return {players:best.players,salary:best.salary,score:bestProjection,rankScore:bestProjection+bestTie*.01,correlation,tournament:evaluation,key};
 }
 function generate(){
  if(['edge','edgeMatchup'].includes($('mode').value)&&!players.some(p=>p._edge)){alert('Retrieve historical NBA game logs first.');return}
