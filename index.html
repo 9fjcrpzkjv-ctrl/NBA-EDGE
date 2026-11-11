@@ -131,7 +131,7 @@ function updateAutoLineupResult(){
  const saved=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeSavedLineup')||'null')}catch(e){return null}})();
  const out=$('resultmsg');if(!out)return;
  if(!saved||!saved.players||!saved.players.length){out.textContent='Generate a lineup to save it for automatic scoring. After games finish, refresh historical game logs and NBA Edge will calculate the actual score.';return;}
- const rows=gameLogs.filter(g=>String(field(g,['GAME_DATE','Date','date'])||'').slice(0,10)===saved.date);
+ const rows=gameLogs.filter(g=>String(field(g,['GAME_DATE','Date','date'])||'').replace(/-/g,'').slice(0,8)===String(saved.date).replace(/-/g,'').slice(0,8));
  if(!rows.length){out.textContent='Saved lineup for '+saved.date+' ('+saved.players.length+' players). Actual score will calculate automatically when completed game logs for this date are retrieved.';return;}
  const byName=new Map(rows.map(g=>[alias(field(g,['PLAYER_NAME','Player','Name','player_name','name'])),g]));
  let matched=0,actual=0;const missing=[];
