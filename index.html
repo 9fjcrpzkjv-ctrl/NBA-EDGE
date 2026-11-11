@@ -42,6 +42,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 <div class="row"><div><label>Projection mode</label><select id="mode"><option value="benchmark">Fantasy Insider benchmark (original)</option><option value="adjusted">Fantasy Insider + NBA Edge minutes adjustment</option><option value="matchup">Fantasy Insider + minutes + defensive matchup</option><option value="edge">NBA Edge independent (experimental)</option><option value="edgeMatchup">NBA Edge independent + matchup + pace</option></select></div><div><label>Contest objective</label><select id="objective"><option value="upside">Tournament upside</option><option value="balanced">Balanced</option></select></div></div>
 <p class="small" id="modelmsg">Benchmark mode is active. Independent mode becomes available when historical inputs are present.</p>
 <p class="small" id="matchupdata">Checking saved matchup data…</p>
+<div style="margin-top:12px"><label>Game environment (optional): one matchup per line — TEAM,OPPONENT,TEAM SPREAD,TOTAL</label><textarea id="gamecontext" rows="3" placeholder="BOS,NYK,-4.5,226"></textarea><button id="applycontext" type="button" class="secondary" style="margin-top:8px">Apply game environment</button><p class="small" id="contextmsg">Enter bookmaker spread and game total to apply a small pace/total adjustment and reduce starter projections in high blowout-risk games.</p></div>
 </section>
 <section class="card"><h2>3. Player pool</h2>
 <div class="row"><div><label>Search player/team</label><input id="search" placeholder="Search names or teams"></div><div><label>Availability</label><select id="status"><option value="active">Eligible only</option><option value="all">All players</option><option value="starter">Estimated starters</option></select></div></div>
@@ -71,6 +72,7 @@ function norm(p){const status=String(p.Status||'').trim().toUpperCase().replace(
 players=players.map(norm);
 let gameLogs=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeGameLogs')||'[]')}catch(e){return []}})(), logSummary={};
 let excludedPlayers=new Set((()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeExcludedPlayers')||'[]')}catch(e){return []}})().map(String));
+let gameContext=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeGameContext')||'{}')}catch(e){return {}}})();
 let defenseByOpponentPosition={},defenseBaselineByPosition={},teamPaceEstimate={},leaguePaceEstimate=0;
 const alias=x=>String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
 function field(o,names){for(const n of names){if(o[n]!==undefined&&o[n]!==''&&o[n]!==null)return o[n];}return 0;}
@@ -129,11 +131,11 @@ function unavailable(p){const s=String(p.Status||'').toUpperCase();return /\b(QU
 function eligible(p){return !unavailable(p)&&p.Projection>0}
 function proj(p){
  const mode=$('mode').value;
- if(mode==='edge'||mode==='edgeMatchup')return mode==='edge'? (p._edge?p._edge.projection:null):edgeMatchupValue(p);
+ if(mode==='edge'||mode==='edgeMatchup'){const value=mode==='edge'?(p._edge?p._edge.projection:null):edgeMatchupValue(p);return value===null?null:applyGameContext(p,value);}
  let value=p.Projection;
  if((mode==='adjusted'||mode==='matchup')&&p._edge&&p._edge.games>=5&&p._edge.sampleMinutes>0){const trend=(p._edge.recentMinutes/p._edge.sampleMinutes)-1;const adjustment=Math.max(-0.10,Math.min(0.10,trend*0.35));value*=1+adjustment;}
  if(mode==='matchup'){const pos=String(p.Position||'').toUpperCase(),opp=String(p.Opponent||p.Opp||'').toUpperCase(),a=defenseByOpponentPosition[opp+'|'+pos],b=defenseBaselineByPosition[pos];if(a&&b&&a.n>=8&&b.n>=20&&b.sum>0){const relative=(a.sum/a.n)/(b.sum/b.n)-1;value*=Math.max(0.95,Math.min(1.05,1+relative*0.25));}}
- return value;
+ return applyGameContext(p,value);
 }
 function edgeMatchupValue(p){
  if(!p._edge)return null;
@@ -156,6 +158,7 @@ function render(){
 function slots(){return ['PG','PG','SG','SG','SF','SF','PF','PF','C']}
 function positions(p){return [p.Position,p.Position2].filter(Boolean)}
 function lineupUtility(p){const projection=proj(p)||0;if($('objective').value!=='upside')return projection;const volatility=num(p.SD)>0?num(p.SD):projection*.30;return projection+volatility*.35;}
+function applyGameContext(p,value){if(!Number.isFinite(value))return value;const team=String(p.Team||'').toUpperCase(),opp=String(p.Opponent||p.Opp||'').toUpperCase();const ctx=gameContext[team+'|'+opp]||gameContext[opp+'|'+team];if(!ctx)return value;const totals=Object.values(gameContext).map(x=>num(x.total)).filter(x=>x>0);const avgTotal=totals.length?totals.reduce((a,b)=>a+b,0)/totals.length:0;let adjusted=value;if(ctx.total>0&&avgTotal>0){const totalFactor=Math.max(.96,Math.min(1.04,1+(ctx.total-avgTotal)*.003));adjusted*=totalFactor;}const spread=team===ctx.team?num(ctx.spread):-num(ctx.spread);const blowout=Math.max(0,Math.min(.04,(Math.abs(spread)-8)*.004));if(String(p.Status||'').toUpperCase().includes('STARTER'))adjusted*=1-blowout;return adjusted;}
 function can(p,s){return positions(p).includes(s)}
 function buildOne(seed, usedSet, seenKeys){
  const required={PG:2,SG:2,SF:2,PF:2,C:1};
@@ -262,10 +265,13 @@ $('historydata').addEventListener('click',async()=>{
 $('logsfile').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('modelmsg').textContent=`Reading ${f.name}…`;try{gameLogs=parseCSV(await readTextFile(f));try{localStorage.setItem('nbaEdgeGameLogs',JSON.stringify(gameLogs));}catch(e){}calcLogs(gameLogs);$('modelmsg').textContent=`Loaded ${gameLogs.length} game-log rows.`;render();}catch(err){$('modelmsg').textContent=err.message||'Could not read game logs CSV.';alert($('modelmsg').textContent);}});
 $('file').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('loadmsg').textContent=`Reading ${f.name}…`;try{const imported=parseCSV(await readTextFile(f));if(imported.length===0)throw new Error('No player rows found. Make sure this is the Draftstars Player CSV, not an Excel workbook or PDF.');players=imported;if(gameLogs.length)calcLogs(gameLogs);generated=[];$('lineups').innerHTML='';$('loadmsg').textContent=`Successfully loaded ${players.length} players from ${f.name}.`+(gameLogs.length?' Historical logs restored and matched to this slate.':'');render()}catch(err){$('loadmsg').textContent=err.message||'Could not read that CSV.';alert($('loadmsg').textContent);}});
 ['search','status','mode'].forEach(id=>$(id).addEventListener('input',render));
+$('applycontext').addEventListener('click',()=>{const raw=$('gamecontext').value.trim();const next={};if(raw){for(const line of raw.split(/\r?\n/)){const parts=line.split(',').map(x=>x.trim());if(parts.length<4)continue;const team=parts[0].toUpperCase(),opp=parts[1].toUpperCase(),spread=Number(parts[2]),total=Number(parts[3]);if(team&&opp&&Number.isFinite(spread)&&Number.isFinite(total)&&total>0)next[team+'|'+opp]={team,opp,spread,total};}}gameContext=next;try{localStorage.setItem('nbaEdgeGameContext',JSON.stringify(gameContext));}catch(e){}generated=[];$('lineups').innerHTML='';$('contextmsg').textContent=Object.keys(gameContext).length+' matchup contexts applied. Game totals adjust projections relative to this slate; estimated starters receive up to a 4% reduction when the spread is 18 points or greater.';render();});
 $('generate').addEventListener('click',generate);
 $('pool').addEventListener('click',e=>{const b=e.target.closest('[data-exclude]');if(!b)return;const id=decodeURIComponent(b.getAttribute('data-exclude'));if(excludedPlayers.has(id))excludedPlayers.delete(id);else excludedPlayers.add(id);try{localStorage.setItem('nbaEdgeExcludedPlayers',JSON.stringify([...excludedPlayers]));}catch(err){}generated=[];$('lineups').innerHTML='';render();});
 $('save').addEventListener('click',()=>{$('resultmsg').textContent=`Recorded: score ${$('actual').value||'not entered'}, rank ${$('rank').value||'not entered'}, prize $${$('prize').value||'0'}. Keep this record with your slate results.`});
 if(gameLogs.length)calcLogs(gameLogs);
+ $('gamecontext').value=Object.values(gameContext).map(x=>`${x.team},${x.opp},${x.spread},${x.total}`).join('\n');
+ if(Object.keys(gameContext).length)$('contextmsg').textContent=Object.keys(gameContext).length+' saved matchup contexts loaded from this device.';
  render();
  const matchupStatus=$('matchupdata');if(matchupStatus){const tagged=gameLogs.filter(g=>g.TEAM&&g.OPPONENT).length;matchupStatus.textContent=`Saved matchup data check: ${tagged} of ${gameLogs.length} historical rows include both team and opponent.`;}
 </script></body></html>
