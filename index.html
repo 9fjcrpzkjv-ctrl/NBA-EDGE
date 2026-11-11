@@ -251,6 +251,6 @@ $('file').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)retu
 ['search','status','mode'].forEach(id=>$(id).addEventListener('input',render));
 $('generate').addEventListener('click',generate);
 $('save').addEventListener('click',()=>{$('resultmsg').textContent=`Recorded: score ${$('actual').value||'not entered'}, rank ${$('rank').value||'not entered'}, prize $${$('prize').value||'0'}. Keep this record with your slate results.`});
-if(gameLogs.length)calcLogs(gameLogs);
+if(gameLogs.length){calcLogs(gameLogs);const tagged=gameLogs.filter(g=>g.TEAM&&g.OPPONENT).length;const total=gameLogs.length;const note=` Saved matchup fields on ${tagged}/${total} historical rows.`;const mm=$('modelmsg');if(mm)mm.textContent+=note;}
  render();
 </script></body></html>
