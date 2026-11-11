@@ -134,7 +134,7 @@ function runHistoricalBacktest(){
  for(const g of gameLogs){
   const name=alias(field(g,['PLAYER_NAME','Player','Name','player_name','name']));
   const date=String(field(g,['GAME_DATE','Date','date'])||'').slice(0,10);
-  if(!name||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))continue;
+  if(!name||date.length!==10||date[4]!=='-'||date[7]!=='-')continue;
   const mins=num(field(g,['MIN','Minutes','minutes']));
   const row={date,mins,fantasy:dsFantasy(g)};
   (grouped[name]??=[]).push(row);
