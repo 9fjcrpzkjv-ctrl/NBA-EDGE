@@ -401,7 +401,7 @@ function buildOne(seed, usedSet, seenKeys){
 function generate(){
  if(['edge','edgeMatchup'].includes($('mode').value)&&!players.some(p=>p._edge)){alert('Retrieve historical NBA game logs first.');return}
  generated=[];let exposure=new Map(),seenKeys=new Set(),tries=0,n=Number($('count').value);
- while(generated.length<n&&tries<n*8){tries++;let l=buildOne(tries,exposure,seenKeys);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
+ while(generated.length<n&&tries<n*8){tries++;let l=buildOne(tries,exposure,seenKeys);if(!l)continue;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
  generated.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
  if(generated.length){const date=$('snapshotdate')?.value||new Date().toLocaleDateString('en-CA');const top=generated[0];const saved={date,projection:top.score,players:top.players.map(p=>({name:p.Name,team:p.Team,projection:proj(p)})),savedAt:new Date().toISOString()};try{localStorage.setItem('nbaEdgeSavedLineup',JSON.stringify(saved));updateAutoLineupResult();}catch(e){$('resultmsg').textContent='Lineup generated, but could not save it for automatic scoring. Browser storage may be full.';}}
  const blocked=players.filter(unavailable).length,manual=excludedPlayers.size;
