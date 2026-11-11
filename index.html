@@ -85,12 +85,12 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 <div id="lineups"></div>
 </section>
 <section class="card wide"><h2>9. Projection accuracy tracker</h2>
-<p class="small">Save a dated snapshot before tip-off. After games finish, retrieve or upload completed player game logs for that date. NBA EDGE will match players and compare each model with actual fantasy points. Snapshots are saved only in this browser.</p>
+<p class="small">NBA Edge automatically saves your top generated lineup in this browser. After games finish, retrieve completed game logs and it will calculate that lineup's actual fantasy score—no player-by-player score entry needed.</p>
 <div class="row"><div><label>Slate date</label><input id="snapshotdate" type="date"></div><div style="align-self:end"><button id="savesnapshot">Save projection snapshot</button></div></div>
 <p class="small" id="snapshotmsg">No projection snapshot saved for this date yet.</p><div id="accuracyreport" class="small"></div>
 <div class="tablewrap"><table><thead><tr><th>Model</th><th>Players scored</th><th>Mean absolute error</th><th>Mean error</th></tr></thead><tbody id="accuracybody"></tbody></table></div></section><section class="card wide"><h2>10. Results tracker</h2>
 <div class="row"><div><label>Live entry actual score</label><input id="actual" type="number" step=".1" placeholder="Enter after games finish"></div><div><label>Contest finishing position</label><input id="rank" type="number" placeholder="e.g. 125"></div><div><label>Prize returned ($)</label><input id="prize" type="number" step=".01" placeholder="0"></div><div style="align-self:end"><button id="save">Save result</button></div></div>
-<p id="resultmsg" class="small">One $15 paid lineup; virtual lineups are tracked at no cost. Keep a record of every slate to evaluate profitability over time.</p>
+<p id="resultmsg" class="small">Actual lineup score is calculated automatically when matching completed game logs are available. Enter finishing position and prize only if you want to track contest outcomes.</p>
 </section>
 <section class="card wide"><h2>Model notes</h2><p class="small">This is a local browser app. Your CSV is processed on your device and is not sent to a server. Historical logs are imported from your uploaded CSV. It does not fetch live injury news, game logs or starting lineups automatically. Verify late news and contest rules before entering. Lineup scores and projections are estimates, not guarantees of winnings.</p></section>
 </main>
@@ -126,6 +126,18 @@ function dsFantasy(g){
  if(cats>=2)score+=2;
  if(cats>=3)score+=2;
  return score;
+}
+function updateAutoLineupResult(){
+ const saved=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeSavedLineup')||'null')}catch(e){return null}})();
+ const out=$('resultmsg');if(!out)return;
+ if(!saved||!saved.players||!saved.players.length){out.textContent='Generate a lineup to save it for automatic scoring. After games finish, refresh historical game logs and NBA Edge will calculate the actual score.';return;}
+ const rows=gameLogs.filter(g=>String(field(g,['GAME_DATE','Date','date'])||'').slice(0,10)===saved.date);
+ if(!rows.length){out.textContent='Saved lineup for '+saved.date+' ('+saved.players.length+' players). Actual score will calculate automatically when completed game logs for this date are retrieved.';return;}
+ const byName=new Map(rows.map(g=>[alias(field(g,['PLAYER_NAME','Player','Name','player_name','name'])),g]));
+ let matched=0,actual=0;const missing=[];
+ saved.players.forEach(p=>{const g=byName.get(alias(p.name));if(g){actual+=dsFantasy(g);matched++;}else missing.push(p.name);});
+ if(matched===saved.players.length){const diff=actual-saved.projection;out.textContent='AUTO-SCORED '+saved.date+': actual '+actual.toFixed(1)+' FP vs '+saved.projection.toFixed(1)+' projected ('+(diff>=0?'+':'')+diff.toFixed(1)+'). '+matched+'/'+saved.players.length+' players matched. Finish position and prize still need contest results.';}
+ else{out.textContent='Scoring '+saved.date+': '+matched+'/'+saved.players.length+' players matched so far. Waiting on: '+missing.join(', ')+'.';}
 }
 function calcLogs(rows){
  const grouped={};
@@ -170,7 +182,7 @@ function calcLogs(rows){
  const modelMessage=$('modelmsg');if(modelMessage)modelMessage.textContent=`Preliminary rolling model calculated for ${matched} eligible players (${coverage}% coverage) from ${rows.length} game-log rows. Projection = blended fantasy points/minute (last 5, last 10 and retrieved sample) × estimated minutes (70% last 5, 30% sample). Saved season-to-date history is restored automatically on this device; treat these as experimental estimates until validated against completed slates.`;
 }
 // Restore derived projections and matchup/correlation features from browser-saved game logs on every page load.
-if(gameLogs.length)calcLogs(gameLogs);
+if(gameLogs.length)calcLogs(gameLogs);updateAutoLineupResult();
 function unavailable(p){const s=String(p.Status||'').toUpperCase();return /\b(QUESTIONABLE|DOUBTFUL|OUT)\b/.test(s)}
 function eligible(p){return !unavailable(p)&&p.Projection>0}
 function proj(p){
@@ -345,6 +357,7 @@ function generate(){
  generated=[];let exposure=new Map(),seenKeys=new Set(),tries=0,n=Number($('count').value);
  while(generated.length<n&&tries<n*8){tries++;let l=buildOne(tries,exposure,seenKeys);if(!l)break;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
  generated.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
+ if(generated.length){const date=$('snapshotdate')?.value||new Date().toLocaleDateString('en-CA');const top=generated[0];const saved={date,projection:top.score,players:top.players.map(p=>({name:p.Name,team:p.Team,projection:proj(p)})),savedAt:new Date().toISOString()};try{localStorage.setItem('nbaEdgeSavedLineup',JSON.stringify(saved));updateAutoLineupResult();}catch(e){$('resultmsg').textContent='Lineup generated, but could not save it for automatic scoring. Browser storage may be full.';}}
  const blocked=players.filter(unavailable).length,manual=excludedPlayers.size;
  $('genmsg').textContent=generated.length?`Generated ${generated.length} lineups. Excluded ${blocked} questionable, doubtful or out players plus ${manual} manually excluded. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found after ${tries} attempts. Eligible: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check each position has enough eligible players, salary cap and exposure limits.`;
  const expMap=new Map();generated.forEach(l=>l.players.forEach(p=>{const id=String(p.ID),old=expMap.get(id);expMap.set(id,{player:p,name:p.Name,count:(old?.count||0)+1});}));
@@ -404,14 +417,14 @@ $('historydata').addEventListener('click',async()=>{
    }catch(err){errors++;}
   }
   if(!rows.length){m.textContent='Found '+events.length+' completed games, but could not read player box-score rows. ESPN may have changed its response format. No projections were changed.';return;}
-  gameLogs=rows;try{localStorage.setItem('nbaEdgeGameLogs',JSON.stringify(gameLogs));}catch(e){m.textContent='History retrieved but could not be saved on this device (browser storage may be full).';}calcLogs(gameLogs);
+  gameLogs=rows;try{localStorage.setItem('nbaEdgeGameLogs',JSON.stringify(gameLogs));}catch(e){m.textContent='History retrieved but could not be saved on this device (browser storage may be full).';}calcLogs(gameLogs);updateAutoLineupResult();
   m.textContent='Retrieved '+rows.length+' player game-log rows from '+checked+' completed games across '+checkedDates.length+' dates (current-season-to-date search, up to 500 games) ('+errors+' game summaries unavailable). '+players.filter(p=>p._edge&&eligible(p)).length+' players matched to your uploaded slate. Pair correlations use separate minimums: 5 shared games for teammates and 3 for opponents, with stronger shrinkage for opponent samples. Select NBA Edge independent mode to use these preliminary historical projections.';
   render();
   const matchupStatus=$('matchupdata');if(matchupStatus){const tagged=gameLogs.filter(g=>g.TEAM&&g.OPPONENT).length;matchupStatus.textContent=`Saved matchup data check: ${tagged} of ${gameLogs.length} historical rows include both team and opponent.`;}
  }catch(err){m.textContent='Could not retrieve game logs: '+(err.message||'unknown error')+'. Existing lineups are unchanged.';}
  finally{b.disabled=false;}
 });
-$('logsfile').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('modelmsg').textContent=`Reading ${f.name}…`;try{gameLogs=parseCSV(await readTextFile(f));try{localStorage.setItem('nbaEdgeGameLogs',JSON.stringify(gameLogs));}catch(e){}calcLogs(gameLogs);$('modelmsg').textContent=`Loaded ${gameLogs.length} game-log rows.`;render();}catch(err){$('modelmsg').textContent=err.message||'Could not read game logs CSV.';alert($('modelmsg').textContent);}});
+$('logsfile').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('modelmsg').textContent=`Reading ${f.name}…`;try{gameLogs=parseCSV(await readTextFile(f));try{localStorage.setItem('nbaEdgeGameLogs',JSON.stringify(gameLogs));}catch(e){}calcLogs(gameLogs);updateAutoLineupResult();$('modelmsg').textContent=`Loaded ${gameLogs.length} game-log rows.`;render();}catch(err){$('modelmsg').textContent=err.message||'Could not read game logs CSV.';alert($('modelmsg').textContent);}});
 $('file').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('loadmsg').textContent=`Reading ${f.name}…`;try{const imported=parseCSV(await readTextFile(f));if(imported.length===0)throw new Error('No player rows found. Make sure this is the Draftstars Player CSV, not an Excel workbook or PDF.');players=imported;if(gameLogs.length)calcLogs(gameLogs);generated=[];$('lineups').innerHTML='';$('loadmsg').textContent=`Successfully loaded ${players.length} players from ${f.name}.`+(gameLogs.length?' Historical logs restored and matched to this slate.':'');render()}catch(err){$('loadmsg').textContent=err.message||'Could not read that CSV.';alert($('loadmsg').textContent);}});
 ['search','status','mode','comparefilter','comparegames'].forEach(id=>$(id).addEventListener('input',render));
 $('fetchodds').addEventListener('click',async()=>{const b=$('fetchodds'),m=$('oddsmsg');b.disabled=true;m.textContent='Fetching free ESPN scoreboard and checking available betting lines…';try{const day=new Date().toLocaleDateString('en-CA').replace(/-/g,'');const res=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates='+day);if(!res.ok)throw new Error('ESPN scoreboard returned HTTP '+res.status);const data=await res.json(),events=Array.isArray(data.events)?data.events:[],next={};let found=0;for(const ev of events){const comp=ev.competitions?.[0],teams=comp?.competitors||[],home=teams.find(t=>t.homeAway==='home'),away=teams.find(t=>t.homeAway==='away'),odds=comp?.odds?.[0]||ev.odds?.[0];if(!home||!away||!odds)continue;const total=Number(odds.overUnder??odds.total?.overUnder??odds.total);const details=String(odds.details||odds.spreadText||'');let fav=(details.match(/^([A-Z]{2,3})\s/)||[])[1]||'';let favSpread=Number(odds.spread);if(!Number.isFinite(favSpread))favSpread=Number((details.match(/([+-]?[0-9]+(?:\.[0-9]+)?)/)||[])[1]);if(!Number.isFinite(total)||total<=0||!Number.isFinite(favSpread))continue;if(!fav){const favorite=odds.favorite?.abbreviation||odds.favorite?.team?.abbreviation||'';fav=String(favorite).toUpperCase();}const h=String(home.team?.abbreviation||'').toUpperCase(),a=String(away.team?.abbreviation||'').toUpperCase();if(!h||!a)continue;let homeSpread,awaySpread;if(fav===h){homeSpread=-Math.abs(favSpread);awaySpread=Math.abs(favSpread);}else if(fav===a){awaySpread=-Math.abs(favSpread);homeSpread=Math.abs(favSpread);}else{const raw=Number(odds.spread);if(!Number.isFinite(raw))continue;homeSpread=raw;awaySpread=-raw;}next[h+'|'+a]={team:h,opp:a,spread:homeSpread,total};next[a+'|'+h]={team:a,opp:h,spread:awaySpread,total};found++;}if(!found){m.textContent='ESPN returned '+events.length+' games but no usable spread + total pairs. The free scoreboard may not publish odds for this slate. No saved game environment was changed.';return;}gameContext=next;try{localStorage.setItem('nbaEdgeGameContext',JSON.stringify(gameContext));}catch(e){}generated=[];$('lineups').innerHTML='';$('gamecontext').value=Object.values(gameContext).filter((x,i,arr)=>arr.findIndex(y=>y.team===x.team&&y.opp===x.opp)>i).map(x=>x.team+','+x.opp+','+x.spread+','+x.total).join('\n');m.textContent='Loaded spreads and totals for '+found+' games. Projection adjustments, blowout protection and matchup-correlation scoring are available; review the game context below, then regenerate lineups.';render();}catch(e){m.textContent='Could not retrieve free game lines: '+(e.message||'unknown error')+'. Existing game context and projections were left unchanged.';}finally{b.disabled=false;}});
