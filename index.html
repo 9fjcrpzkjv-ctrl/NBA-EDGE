@@ -88,7 +88,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 <p class="small">NBA Edge automatically saves your top generated lineup in this browser. After games finish, retrieve completed game logs and it will calculate that lineup's actual fantasy score—no player-by-player score entry needed.</p>
 <div class="row"><div><label>Slate date</label><input id="snapshotdate" type="date"></div><div style="align-self:end"><button id="savesnapshot">Save projection snapshot</button></div></div>
 <p class="small" id="snapshotmsg">No projection snapshot saved for this date yet.</p><div id="accuracyreport" class="small"></div>
-<div class="tablewrap"><table><thead><tr><th>Model</th><th>Players scored</th><th>Mean absolute error</th><th>Mean error</th></tr></thead><tbody id="accuracybody"></tbody></table></div></section><section class="card wide"><h2>10. Results tracker</h2>
+<div class="tablewrap"><table><thead><tr><th>Model</th><th>Players scored</th><th>Mean absolute error</th><th>Mean error</th></tr></thead><tbody id="accuracybody"></tbody></table></div><div style="margin-top:12px"><button id="runbacktest" type="button" class="secondary">Run historical walk-forward backtest</button><p class="small" id="backtestreport">Tests each player's earlier games only. It compares NBA EDGE rolling projections with a simple last-10 fantasy-points baseline; it does not change projections, lineups or saved results.</p></div></section><section class="card wide"><h2>10. Results tracker</h2>
 <div class="row"><div><label>Live entry actual score</label><input id="actual" type="number" step=".1" placeholder="Enter after games finish"></div><div><label>Contest finishing position</label><input id="rank" type="number" placeholder="e.g. 125"></div><div><label>Prize returned ($)</label><input id="prize" type="number" step=".01" placeholder="0"></div><div style="align-self:end"><button id="save">Save result</button></div></div>
 <p id="resultmsg" class="small">Actual lineup score is calculated automatically when matching completed game logs are available. Enter finishing position and prize only if you want to track contest outcomes.</p>
 </section>
@@ -126,6 +126,49 @@ function dsFantasy(g){
  if(cats>=2)score+=2;
  if(cats>=3)score+=2;
  return score;
+}
+function runHistoricalBacktest(){
+ const report=$('backtestreport');
+ if(!Array.isArray(gameLogs)||!gameLogs.length){report.textContent='No historical game logs are loaded. Retrieve or upload game logs first.';return;}
+ const grouped={};
+ for(const g of gameLogs){
+  const name=alias(field(g,['PLAYER_NAME','Player','Name','player_name','name']));
+  const date=String(field(g,['GAME_DATE','Date','date'])||'').slice(0,10);
+  if(!name||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))continue;
+  const mins=num(field(g,['MIN','Minutes','minutes']));
+  const row={date,mins,fantasy:dsFantasy(g)};
+  (grouped[name]??=[]).push(row);
+ }
+ const edgeErrors=[],baselineErrors=[];
+ let evaluated=0,playersTested=0;
+ for(const rows of Object.values(grouped)){
+  rows.sort((a,b)=>a.date.localeCompare(b.date));
+  const prior=[];
+  let playerEvaluated=0;
+  for(let i=0;i<rows.length;){
+   const date=rows[i].date,day=[];
+   while(i<rows.length&&rows[i].date===date){day.push(rows[i]);i++;}
+   for(const target of day){
+    if(target.mins<=0||prior.length<5)continue;
+    const last5=prior.slice(-5),last10=prior.slice(-10);
+    const avg=(arr,key)=>arr.length?arr.reduce((sum,x)=>sum+x[key],0)/arr.length:0;
+    const fppm=.50*avg(last5,'fppm')+.30*avg(last10,'fppm')+.20*avg(prior,'fppm');
+    const projectedMinutes=.70*avg(last5,'mins')+.30*avg(prior,'mins');
+    const edgePrediction=fppm*projectedMinutes;
+    const baselinePrediction=avg(last10,'fantasy');
+    if(!Number.isFinite(edgePrediction)||!Number.isFinite(baselinePrediction))continue;
+    edgeErrors.push(target.fantasy-edgePrediction);
+    baselineErrors.push(target.fantasy-baselinePrediction);
+    evaluated++;playerEvaluated++;
+   }
+   for(const row of day)if(row.mins>0)prior.push({...row,fppm:row.fantasy/row.mins});
+  }
+  if(playerEvaluated)playersTested++;
+ }
+ const metrics=errors=>({mae:errors.length?errors.reduce((s,e)=>s+Math.abs(e),0)/errors.length:0,rmse:errors.length?Math.sqrt(errors.reduce((s,e)=>s+e*e,0)/errors.length):0,bias:errors.length?errors.reduce((s,e)=>s+e,0)/errors.length:0});
+ if(!evaluated){report.textContent='Not enough chronological history to test yet. At least 6 dated, played appearances per player are needed.';return;}
+ const edge=metrics(edgeErrors),base=metrics(baselineErrors),improvement=base.mae>0?(base.mae-edge.mae)/base.mae*100:0;
+ report.textContent='Walk-forward test complete: '+evaluated.toLocaleString()+' player-game predictions across '+playersTested+' players. NBA EDGE rolling model — MAE '+edge.mae.toFixed(2)+', RMSE '+edge.rmse.toFixed(2)+', bias '+(edge.bias>0?'+':'')+edge.bias.toFixed(2)+'. Last-10 baseline — MAE '+base.mae.toFixed(2)+', RMSE '+base.rmse.toFixed(2)+', bias '+(base.bias>0?'+':'')+base.bias.toFixed(2)+'. '+(improvement>=0?'NBA EDGE reduced MAE by ':'NBA EDGE increased MAE by ')+Math.abs(improvement).toFixed(1)+'% versus the baseline. This is a historical player-level test, not a lineup or tournament simulation; only games with minutes are scored, and no future games are used to predict earlier ones.';
 }
 function updateAutoLineupResult(){
  const saved=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeSavedLineup')||'null')}catch(e){return null}})();
@@ -432,6 +475,7 @@ $('file').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)retu
 ['search','status','mode','comparefilter','comparegames'].forEach(id=>$(id).addEventListener('input',render));
 $('fetchodds').addEventListener('click',async()=>{const b=$('fetchodds'),m=$('oddsmsg');b.disabled=true;m.textContent='Fetching free ESPN scoreboard and checking available betting lines…';try{const day=new Date().toLocaleDateString('en-CA').replace(/-/g,'');const res=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates='+day);if(!res.ok)throw new Error('ESPN scoreboard returned HTTP '+res.status);const data=await res.json(),events=Array.isArray(data.events)?data.events:[],next={};let found=0;for(const ev of events){const comp=ev.competitions?.[0],teams=comp?.competitors||[],home=teams.find(t=>t.homeAway==='home'),away=teams.find(t=>t.homeAway==='away'),odds=comp?.odds?.[0]||ev.odds?.[0];if(!home||!away||!odds)continue;const total=Number(odds.overUnder??odds.total?.overUnder??odds.total);const details=String(odds.details||odds.spreadText||'');let fav=(details.match(/^([A-Z]{2,3})\s/)||[])[1]||'';let favSpread=Number(odds.spread);if(!Number.isFinite(favSpread))favSpread=Number((details.match(/([+-]?[0-9]+(?:\.[0-9]+)?)/)||[])[1]);if(!Number.isFinite(total)||total<=0||!Number.isFinite(favSpread))continue;if(!fav){const favorite=odds.favorite?.abbreviation||odds.favorite?.team?.abbreviation||'';fav=String(favorite).toUpperCase();}const h=String(home.team?.abbreviation||'').toUpperCase(),a=String(away.team?.abbreviation||'').toUpperCase();if(!h||!a)continue;let homeSpread,awaySpread;if(fav===h){homeSpread=-Math.abs(favSpread);awaySpread=Math.abs(favSpread);}else if(fav===a){awaySpread=-Math.abs(favSpread);homeSpread=Math.abs(favSpread);}else{const raw=Number(odds.spread);if(!Number.isFinite(raw))continue;homeSpread=raw;awaySpread=-raw;}next[h+'|'+a]={team:h,opp:a,spread:homeSpread,total};next[a+'|'+h]={team:a,opp:h,spread:awaySpread,total};found++;}if(!found){m.textContent='ESPN returned '+events.length+' games but no usable spread + total pairs. The free scoreboard may not publish odds for this slate. No saved game environment was changed.';return;}gameContext=next;try{localStorage.setItem('nbaEdgeGameContext',JSON.stringify(gameContext));}catch(e){}generated=[];$('lineups').innerHTML='';$('gamecontext').value=Object.values(gameContext).filter((x,i,arr)=>arr.findIndex(y=>y.team===x.team&&y.opp===x.opp)>i).map(x=>x.team+','+x.opp+','+x.spread+','+x.total).join('\n');m.textContent='Loaded spreads and totals for '+found+' games. Projection adjustments, blowout protection and matchup-correlation scoring are available; review the game context below, then regenerate lineups.';render();}catch(e){m.textContent='Could not retrieve free game lines: '+(e.message||'unknown error')+'. Existing game context and projections were left unchanged.';}finally{b.disabled=false;}});
 $('applycontext').addEventListener('click',()=>{const raw=$('gamecontext').value.trim();const next={};if(raw){for(const line of raw.split(/\r?\n/)){const parts=line.split(',').map(x=>x.trim());if(parts.length<4)continue;const team=parts[0].toUpperCase(),opp=parts[1].toUpperCase(),spread=Number(parts[2]),total=Number(parts[3]);if(team&&opp&&Number.isFinite(spread)&&Number.isFinite(total)&&total>0)next[team+'|'+opp]={team,opp,spread,total};}}gameContext=next;try{localStorage.setItem('nbaEdgeGameContext',JSON.stringify(gameContext));}catch(e){}generated=[];$('lineups').innerHTML='';$('contextmsg').textContent=Object.keys(gameContext).length+' matchup contexts applied. Game totals adjust projections and power matchup-correlation scoring; estimated starters receive a blowout reduction when spreads are large.';render();});
+$('runbacktest').addEventListener('click',runHistoricalBacktest);
 $('snapshotdate').value=new Date().toLocaleDateString('en-CA');
 $('snapshotdate').addEventListener('change',render);
 $('savesnapshot').addEventListener('click',()=>{const date=$('snapshotdate').value;if(!date){$('snapshotmsg').textContent='Choose a slate date first.';return;}const rows=players.filter(p=>eligible(p)&&p.Projection>0&&p._edge&&p._edge.projection>0).map(p=>({name:p.Name,team:p.Team,baseline:p.Projection,independent:p._edge.projection}));if(!rows.length){$('snapshotmsg').textContent='No matched players available. Load the slate and historical game logs first.';return;}let snaps={};try{snaps=JSON.parse(localStorage.getItem('nbaEdgePredictionSnapshots')||'{}')}catch(e){}if(snaps[date]&&!confirm('A snapshot already exists for '+date+'. Replace it?'))return;snaps[date]={savedAt:new Date().toISOString(),players:rows};try{localStorage.setItem('nbaEdgePredictionSnapshots',JSON.stringify(snaps));$('snapshotmsg').textContent='Saved '+rows.length+' player projections for '+date+'.';render();}catch(e){$('snapshotmsg').textContent='Could not save snapshot. Browser storage may be full.';}});
