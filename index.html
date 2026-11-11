@@ -219,10 +219,15 @@ $('historydata').addEventListener('click',async()=>{
     const res=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event='+encodeURIComponent(ev.id));
     if(!res.ok)throw new Error('HTTP '+res.status);
     const data=await res.json(),groups=data.boxscore?.players||[];
+    const competitors=ev.competitions?.[0]?.competitors||[];
+    const teamById={};competitors.forEach(c=>{const id=String(c.team?.id||'');if(id)teamById[id]=String(c.team?.abbreviation||c.team?.shortDisplayName||'').toUpperCase();});
     for(const group of groups){
      const statGroup=(group.statistics||[])[0]||{},labels=statGroup.labels||[];
+     const groupTeamId=String(group.team?.id||'');
+     const playerTeam=teamById[groupTeamId]||String(group.team?.abbreviation||'').toUpperCase();
+     const opponentTeam=competitors.find(c=>String(c.team?.id||'')!==groupTeamId)?.team?.abbreviation||'';
      for(const a of statGroup.athletes||[]){
-      const vals=a.stats||[],obj={PLAYER_NAME:a.athlete?.displayName||a.athlete?.fullName||'',GAME_DATE:gameDay};
+      const vals=a.stats||[],obj={PLAYER_NAME:a.athlete?.displayName||a.athlete?.fullName||'',GAME_DATE:gameDay,TEAM:playerTeam,OPPONENT:String(opponentTeam).toUpperCase()};
       labels.forEach((label,i)=>obj[String(label).toUpperCase()]=vals[i]??'');
       const pair=(v)=>{const z=String(v||'0-0').split('-').map(Number);return [z[0]||0,z[1]||0]};
       const [fgm,fga]=pair(obj.FG),[fg3m,fg3a]=pair(obj['3PT']),[ftm,fta]=pair(obj.FT);
