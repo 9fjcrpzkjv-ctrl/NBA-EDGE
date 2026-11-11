@@ -299,6 +299,32 @@ function playerCeilingScore(p){const projection=Math.max(0,proj(p)||0);const vol
 function leverageMultiplier(p){const own=ownershipEstimate(p);if(!Number.isFinite(own))return 1;const ceilingRate=Math.max(.12,Math.min(.55,playerVolatility(p,Math.max(1,proj(p)||1))/Math.max(1,proj(p)||1)));const ownershipEdge=Math.max(-.10,Math.min(.10,(12-own)*.0035));const sourceConfidence=ownershipSource(p)==='manual'?1:.55;return 1+ownershipEdge*(.65+ceilingRate)*sourceConfidence;}
 function lineupLeverageAdjustment(picked,baseScore){if($('rankingmode')?.value!=='leverage'||!baseScore)return 0;const rows=picked.map(p=>({own:ownershipEstimate(p),ceiling:playerCeilingScore(p)})).filter(x=>Number.isFinite(x.own)&&x.ceiling>0);if(rows.length<4)return 0;const total=rows.reduce((a,x)=>a+x.ceiling,0);if(!total)return 0;const lowOwned=rows.filter(x=>x.own<=8).reduce((a,x)=>a+x.ceiling,0)/total;const chalk=rows.filter(x=>x.own>=25).reduce((a,x)=>a+x.ceiling,0)/total;const coverage=rows.length/9;const adjustment=Math.max(-.06,Math.min(.06,(lowOwned-chalk)*.08));return baseScore*adjustment*coverage;}
 function lineupUtility(p){let score=playerCeilingScore(p);score*=rotationReliability(p);if($('rankingmode')?.value==='leverage')score*=leverageMultiplier(p);return score;}
+function seededRandom(seed){let x=(Number(seed)||1)>>>0;return ()=>{x=(x+0x6D2B79F5)>>>0;let t=x;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return ((t^(t>>>14))>>>0)/4294967296;};}
+function randomNormal(rng){const u=Math.max(1e-9,rng()),v=Math.max(1e-9,rng());return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function playerOutcome(p,rng){const mean=Math.max(0,proj(p)||0)*rotationReliability(p);const sd=Math.max(1,playerVolatility(p,mean));return Math.max(0,mean+randomNormal(rng)*sd);}
+function buildFieldThresholds(seed){
+ const pool=players.filter(p=>!excludedPlayers.has(String(p.ID))&&eligible(p)&&proj(p)>0&&p.Price>0);
+ if(pool.length<9)return [];
+ const weights=pool.map(p=>{const own=ownershipEstimate(p);const projection=Math.max(1,proj(p));const value=projection/(p.Price/1000);return Number.isFinite(own)?Math.max(.2,own):Math.pow(projection,1.05)*Math.pow(Math.max(.1,value),.25);});
+ const rng=seededRandom(seed+7919),scores=[];
+ for(let n=0;n<1400;n++){const used=new Set();let total=0;for(let k=0;k<9;k++){let sum=0;for(let i=0;i<pool.length;i++)if(!used.has(i))sum+=weights[i];if(!sum)break;let pick=rng()*sum,index=-1;for(let i=0;i<pool.length;i++){if(used.has(i))continue;pick-=weights[i];if(pick<=0){index=i;break;}}if(index<0)index=pool.findIndex((p,i)=>!used.has(i));if(index<0)break;used.add(index);total+=playerOutcome(pool[index],rng);}if(used.size===9)scores.push(total);}
+ return scores.sort((a,b)=>a-b);
+}
+function lineupTournamentEvaluation(picked,seed,fieldThresholds){
+ const rng=seededRandom(seed+104729),samples=[];
+ for(let i=0;i<220;i++){let total=0;for(const p of picked)total+=playerOutcome(p,rng);samples.push(total);}
+ samples.sort((a,b)=>a-b);
+ const quantile=q=>fieldThresholds.length?fieldThresholds[Math.min(fieldThresholds.length-1,Math.floor(q*(fieldThresholds.length-1)))]:0;
+ const top1=fieldThresholds.length?samples.filter(x=>x>=quantile(.99)).length/samples.length:0;
+ const top01=fieldThresholds.length?samples.filter(x=>x>=quantile(.999)).length/samples.length:0;
+ const mean=samples.reduce((a,b)=>a+b,0)/samples.length;
+ const ownershipRows=picked.map(p=>ownershipEstimate(p)).filter(Number.isFinite);
+ const avgOwn=ownershipRows.length?ownershipRows.reduce((a,b)=>a+b,0)/ownershipRows.length:0;
+ const leverage=ownershipRows.length>=5?Math.max(-.12,Math.min(.12,(18-avgOwn)*.004)):0;
+ const correlation=lineupCorrelationProfile(picked);
+ const correlationBonus=$('rankingmode')?.value==='leverage'?correlation.rate*100:0;
+ return {rankScore:top1*100+top01*250+mean*.012+leverage*100+correlationBonus,top1,top01,mean,avgOwn,correlation};
+}
 function autoEstimateOwnership(){const pool=players.filter(p=>eligible(p)&&proj(p)!==null&&proj(p)>0&&p.Price>0&&!excludedPlayers.has(String(p.ID)));if(!pool.length)return 0;const weighted=pool.map(p=>{const projection=Math.max(1,proj(p));const value=projection/(p.Price/1000);const starter=String(p.Status||'').includes('STARTER')?1.18:1;const injury=p._injuryWasStarter===true?1.05:1;const replacement=replacementOpportunityMultiplier(p);return {key:alias(p.Name),weight:Math.pow(projection,1.12)*Math.pow(Math.max(.1,value),.38)*starter*injury*replacement};});const total=weighted.reduce((a,x)=>a+x.weight,0);const next={};weighted.forEach(x=>next[x.key]=Math.min(65,Math.max(.5,900*x.weight/total)));ownershipByName=next;ownershipSourceByName={};Object.keys(next).forEach(k=>ownershipSourceByName[k]='modelled');try{localStorage.setItem('nbaEdgeOwnership',JSON.stringify(next));localStorage.setItem('nbaEdgeOwnershipSource',JSON.stringify(ownershipSourceByName));}catch(e){}return weighted.length;}
 function blowoutRisk(spread){const margin=Math.abs(Number(spread)||0);if(margin<8)return 0;if(margin<12)return .015;if(margin<16)return .035;if(margin<20)return .06;return .09;}
 function applyGameContext(p,value){if(!Number.isFinite(value))return value;const team=String(p.Team||'').toUpperCase(),opp=String(p.Opponent||p.Opp||'').toUpperCase();const ctx=gameContext[team+'|'+opp]||gameContext[opp+'|'+team];if(!ctx)return value;const totals=Object.values(gameContext).map(x=>num(x.total)).filter(x=>x>0);const avgTotal=totals.length?totals.reduce((a,b)=>a+b,0)/totals.length:0;let adjusted=value;if(ctx.total>0&&avgTotal>0){const totalFactor=Math.max(.96,Math.min(1.04,1+(ctx.total-avgTotal)*.003));adjusted*=totalFactor;}const spread=team===ctx.team?num(ctx.spread):-num(ctx.spread);const risk=blowoutRisk(spread);const isStarter=String(p.Status||'').toUpperCase().includes('STARTER');if(isStarter)adjusted*=1-risk;return adjusted;}
@@ -307,7 +333,7 @@ function empiricalPairCorrelation(a,b,sameTeam){const pair=playerPairCorrelation
 function lineupCorrelationProfile(picked){const games={};for(const p of picked){const ctx=playerGameContext(p);if(!ctx)continue;const g=games[ctx.key]||(games[ctx.key]={total:ctx.total,spread:ctx.spread,teams:{}});g.teams[ctx.team]=(g.teams[ctx.team]||0)+1;}const rows=Object.values(games),slateGames=new Map();Object.values(gameContext).forEach(ctx=>{const a=String(ctx.team||'').toUpperCase(),b=String(ctx.opp||'').toUpperCase(),total=num(ctx.total);if(a&&b&&total>0)slateGames.set([a,b].sort().join('|'),total);});const slateTotals=[...slateGames.values()],avgTotal=slateTotals.length?slateTotals.reduce((a,b)=>a+b,0)/slateTotals.length:0;let rate=0,stacks=0,twoSided=0;for(const g of rows){const sides=Object.values(g.teams),count=sides.reduce((a,b)=>a+b,0);if(count<2)continue;stacks++;const gameTotalEdge=avgTotal>0?Math.max(-1,Math.min(1,(g.total-avgTotal)/25)):0;rate+=gameTotalEdge*.003*Math.min(3,count-1);if(sides.length>=2&&g.spread<=7){twoSided++;rate+=.004;}else if(sides.length>=2&&g.spread<=10){twoSided++;rate+=.002;}}let pairCount=0,teammatePairs=0,opponentPairs=0,pairCorrSum=0;for(let i=0;i<picked.length;i++)for(let j=i+1;j<picked.length;j++){const a=picked[i],b=picked[j],ca=playerGameContext(a),cb=playerGameContext(b);if(!ca||!cb||ca.key!==cb.key)continue;const sameTeam=ca.team===cb.team,pair=empiricalPairCorrelation(a,b,sameTeam);if(!pair)continue;const reliability=pair.n/(pair.n+(sameTeam?8:16));pairCorrSum+=pair.r*reliability;pairCount++;if(sameTeam)teammatePairs++;else opponentPairs++;rate+=pair.r*reliability*(sameTeam?.004:.003);}rate=Math.max(-.02,Math.min(.03,rate));return {rate,games:rows.length,stacks,twoSided,empiricalPairs:pairCount,teammatePairs,opponentPairs,avgPairCorrelation:pairCount?pairCorrSum/pairCount:0};}
 function lineupCorrelationAdjustment(picked,baseScore){if($('rankingmode')?.value!=='leverage'||!baseScore)return 0;return baseScore*lineupCorrelationProfile(picked).rate;}
 function can(p,s){return positions(p).includes(s)}
-function buildOne(seed, usedSet, seenKeys){
+function buildOne(seed, usedSet, seenKeys, fieldThresholds){
  // Beam search evaluates many partial rosters instead of stopping at the first
  // valid DFS combination. Each beam state is a distinct partial lineup.
  const required={PG:2,SG:2,SF:2,PF:2,C:1};
@@ -323,7 +349,7 @@ function buildOne(seed, usedSet, seenKeys){
   return !excludedPlayers.has(String(p.ID))&&eligible(p)&&riskCap>0&&proj(p)!==null&&proj(p)>0&&Number.isFinite(p.Price)&&p.Price>0&&used<Math.min(maxAppearances,riskCap);
  });
  const maxShared=Math.max(0,Math.min(8,Number($('maxshared')?.value||7)));
- const beamWidth=48,branchWidth=14;
+ const beamWidth=72,branchWidth=18;
  function noise(id){let x=0;const t=String(id)+'|'+seed;for(let i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))>>>0;return (x%10000)/10000*.65;}
  function slotCandidates(state,pos){
   return pool.filter(p=>can(p,pos)&&!state.players.some(q=>String(q.ID)===String(p.ID))&&state.spent+p.Price<=cap);
@@ -354,11 +380,11 @@ function buildOne(seed, usedSet, seenKeys){
   for(const state of beam){
    const {pos,list}=nextPosition(state);
    if(!pos||!list.length)continue;
-   const utilityOrder=[...list].sort((a,b)=>(lineupUtility(b)-(usedSet.get(String(b.ID))||0)*1.25+noise(b.ID))-(lineupUtility(a)-(usedSet.get(String(a.ID))||0)*1.25+noise(a.ID)));
-   const valueOrder=[...list].sort((a,b)=>(lineupUtility(b)/(b.Price/1000))-(lineupUtility(a)/(a.Price/1000)));
+   const utilityOrder=[...list].sort((a,b)=>((proj(b)||0)*.55+playerVolatility(b,proj(b)||0)*.65+lineupUtility(b)*.25-(usedSet.get(String(b.ID))||0)*1.25+noise(b.ID))-((proj(a)||0)*.55+playerVolatility(a,proj(a)||0)*.65+lineupUtility(a)*.25-(usedSet.get(String(a.ID))||0)*1.25+noise(a.ID)));
+   const valueOrder=[...list].sort((a,b)=>(((proj(b)||0)+playerVolatility(b,proj(b)||0)*.8)/(b.Price/1000))-(((proj(a)||0)+playerVolatility(a,proj(a)||0)*.8)/(a.Price/1000)));
    // Preserve both raw ceiling leaders and salary-efficient alternatives.
-   const branch=[...new Map([...utilityOrder.slice(0,9),...valueOrder.slice(0,5)].map(p=>[String(p.ID),p])).values()];
-   branch.sort((a,b)=>lineupUtility(b)-lineupUtility(a));
+   const branch=[...new Map([...utilityOrder.slice(0,12),...valueOrder.slice(0,6)].map(p=>[String(p.ID),p])).values()];
+   branch.sort((a,b)=>((proj(b)||0)*.55+playerVolatility(b,proj(b)||0)*.65+lineupUtility(b)*.25)-((proj(a)||0)*.55+playerVolatility(a,proj(a)||0)*.65+lineupUtility(a)*.25));
    for(const p of branch.slice(0,branchWidth)){
     const remaining={...state.remaining};remaining[pos]--;
     const next={players:[...state.players,p],remaining,spent:state.spent+p.Price,score:state.score+proj(p),rankScore:state.rankScore+lineupUtility(p)};
@@ -391,8 +417,8 @@ function buildOne(seed, usedSet, seenKeys){
   const overlaps=generated.map(existing=>existing.players.filter(p=>state.players.some(q=>String(q.ID)===String(p.ID))).length);
   if(overlaps.some(v=>v>maxShared))continue;
   const correlation=lineupCorrelationProfile(state.players);
-  const rankScore=state.rankScore+lineupLeverageAdjustment(state.players,state.rankScore)+lineupCorrelationAdjustment(state.players,state.rankScore);
-  completed.push({players:state.players,salary:state.spent,score:state.score,rankScore,correlation,key});
+  const evaluation=lineupTournamentEvaluation(state.players,seed,fieldThresholds);
+  completed.push({players:state.players,salary:state.spent,score:state.score,rankScore:evaluation.rankScore,correlation:evaluation.correlation,tournament:evaluation,key});
  }
  completed.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
  return completed[0]||null;
@@ -400,8 +426,8 @@ function buildOne(seed, usedSet, seenKeys){
 
 function generate(){
  if(['edge','edgeMatchup'].includes($('mode').value)&&!players.some(p=>p._edge)){alert('Retrieve historical NBA game logs first.');return}
- generated=[];let exposure=new Map(),seenKeys=new Set(),tries=0,n=Number($('count').value);
- while(generated.length<n&&tries<n*8){tries++;let l=buildOne(tries,exposure,seenKeys);if(!l)continue;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
+ generated=[];let exposure=new Map(),seenKeys=new Set(),tries=0,n=Number($('count').value);const fieldThresholds=buildFieldThresholds(20261112);
+ while(generated.length<n&&tries<n*8){tries++;let l=buildOne(tries,exposure,seenKeys,fieldThresholds);if(!l)continue;let key=l.players.map(p=>p.ID).sort().join('-');if(seenKeys.has(key))continue;l.key=key;seenKeys.add(key);generated.push(l);l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)})}
  generated.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
  if(generated.length){const date=$('snapshotdate')?.value||new Date().toLocaleDateString('en-CA');const top=generated[0];const saved={date,projection:top.score,players:top.players.map(p=>({name:p.Name,team:p.Team,projection:proj(p)})),savedAt:new Date().toISOString()};try{localStorage.setItem('nbaEdgeSavedLineup',JSON.stringify(saved));updateAutoLineupResult();}catch(e){$('resultmsg').textContent='Lineup generated, but could not save it for automatic scoring. Browser storage may be full.';}}
  const blocked=players.filter(unavailable).length,manual=excludedPlayers.size;
@@ -411,7 +437,7 @@ function generate(){
  const riskRows=expRows.map(x=>{const e=x.player._edge;let level='LOW DATA',reason='Insufficient history',mins='—';if(e&&e.games>=3){mins=e.recentMinutes.toFixed(1);if(e.zeroRecent>=2){level='HIGH';reason=e.zeroRecent+' zero-minute games in last 5';}else if(e.zeroRecent===1){level='ELEVATED';reason='1 zero-minute game in last 5';}else if(e.recentMinutes<8){level='HIGH';reason='Low recent minutes';}else if(e.recentMinutes<12&&e.sampleMinutes>=18){level='ELEVATED';reason='Recent minutes below longer-term role';}else{level='LOW';reason='No major minutes warning';}}return {name:x.name,count:x.count,level,reason,mins};}).sort((a,b)=>a.level.localeCompare(b.level)||b.count-a.count);
  const riskAudit=riskRows.map(x=>x.name+' | '+x.level+' | '+x.mins+' recent MPG | '+x.reason+' | '+x.count+'/'+generated.length+' lineups').join('<br>');
  const expEl=$('exposurereport');if(expEl)expEl.innerHTML=generated.length?'<b>Player exposure and rotation-risk audit</b><br>'+expRows.map(p=>p.name+': '+p.count+'/'+generated.length+' ('+Math.round(p.count/generated.length*100)+'%)').join(' · ')+'<br><b>Risk review</b><br>'+riskAudit+'<br><span class="small">Players with at least one recent zero-minute appearance or fewer than 8 recent MPG are capped at 10% exposure. Players with 2+ zero-minute appearances in their last 5 logged appearances are excluded. Historical flags are not confirmed future rotations.</span>':'No exposure report yet.';
- $('lineups').innerHTML=generated.map((l,i)=>`<div class="lineup"><div class="lineuphead"><b>${i===0?'⭐ Suggested $15 entry':'Virtual lineup '+(i+1)}</b><span class="badge">${l.score.toFixed(1)} proj. · ${l.rankScore.toFixed(1)} ${$("rankingmode").value==="leverage"?"leverage-adjusted tournament":$("objective").value==="upside"?"upside":"balanced"} score</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} <span class="pill">${p.Position}${p.Position2?'/'+p.Position2:''}</span></span><span>${p.Price.toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<div class="small" style="margin-top:8px">${l.correlation&&l.correlation.stacks?`Game correlation: ${l.correlation.stacks} stacked game(s), ${l.correlation.twoSided} with both teams represented`:'Game correlation: insufficient matchup data'}<br>Historical game pairs: ${l.correlation?.empiricalPairs||0} (${l.correlation?.teammatePairs||0} teammate, ${l.correlation?.opponentPairs||0} opponent)${l.correlation?.empiricalPairs?`, avg shrunk correlation ${(l.correlation.avgPairCorrelation*100).toFixed(1)}%`:' (need at least 5 shared games)'}<br>Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${((num($('cap').value)||100000)-l.salary).toLocaleString('en-AU')}</div></div>`).join('');
+ $('lineups').innerHTML=generated.map((l,i)=>`<div class="lineup"><div class="lineuphead"><b>${i===0?'⭐ Suggested $15 entry':'Virtual lineup '+(i+1)}</b><span class="badge">${l.score.toFixed(1)} proj. · ${l.rankScore.toFixed(1)} tournament EV · ${l.tournament?(l.tournament.top1*100).toFixed(1):'—'}% top-1% modelled</span></div>${l.players.map(p=>`<div class="player"><span>${p.Name} <span class="pill">${p.Position}${p.Position2?'/'+p.Position2:''}</span></span><span>${p.Price.toLocaleString('en-AU')} · ${proj(p).toFixed(1)}</span></div>`).join('')}<div class="small" style="margin-top:8px">${l.correlation&&l.correlation.stacks?`Game correlation: ${l.correlation.stacks} stacked game(s), ${l.correlation.twoSided} with both teams represented`:'Game correlation: insufficient matchup data'}<br>Historical game pairs: ${l.correlation?.empiricalPairs||0} (${l.correlation?.teammatePairs||0} teammate, ${l.correlation?.opponentPairs||0} opponent)${l.correlation?.empiricalPairs?`, avg shrunk correlation ${(l.correlation.avgPairCorrelation*100).toFixed(1)}%`:' (need at least 5 shared games)'}<br>Salary: $${l.salary.toLocaleString('en-AU')} · Remaining: $${((num($('cap').value)||100000)-l.salary).toLocaleString('en-AU')}</div></div>`).join('');
 }
 function parseCSV(text){
  text=String(text||'').replace(/^\uFEFF/,'');
