@@ -110,7 +110,7 @@ function norm(p){const status=String(p.Status||'').trim().toUpperCase().replace(
 players=players.map(norm);
 let gameLogs=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeGameLogs')||'[]')}catch(e){return []}})(), logSummary={}, playerPairCorrelation={};
 let latestInjuries=[];
-let dailyMatchups=[],dailyScheduleDate='',dailyScheduleLabel='';
+let dailyMatchups=[],dailyScheduleDate='',dailyScheduleLabel='',dailyRosterPlayers=[];
 let ownershipByName=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeOwnership')||'{}')}catch(e){return {}}})();
 let ownershipSourceByName=(()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeOwnershipSource')||'{}')}catch(e){return {}}})();
 let excludedPlayers=new Set((()=>{try{return JSON.parse(localStorage.getItem('nbaEdgeExcludedPlayers')||'[]')}catch(e){return []}})().map(String));
@@ -286,11 +286,21 @@ async function loadDailyMatchups(){
   dailyMatchups=events.map(ev=>{
    const comps=ev.competitions?.[0]?.competitors||[];
    const home=comps.find(c=>c.homeAway==='home')||comps[0],away=comps.find(c=>c.homeAway==='away')||comps[1];
-   return {id:ev.id,home:String(home?.team?.abbreviation||'').toUpperCase(),away:String(away?.team?.abbreviation||'').toUpperCase(),status:ev.status?.type?.shortDetail||ev.status?.type?.description||'Scheduled',date:ev.date||''};
+   return {id:ev.id,homeId:String(home?.team?.id||''),awayId:String(away?.team?.id||''),home:String(home?.team?.abbreviation||'').toUpperCase(),away:String(away?.team?.abbreviation||'').toUpperCase(),status:ev.status?.type?.shortDetail||ev.status?.type?.description||'Scheduled',date:ev.date||''};
   }).filter(g=>g.home&&g.away);
   dailyScheduleDate=date;
   dailyScheduleLabel=new Date().toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'short'});
   if(!dailyMatchups.length){msg.textContent='No NBA games found for the current US schedule date ('+date+'). Check again closer to tip-off.';renderPlayerProps();return;}
+  msg.textContent='Schedule loaded. Fetching current rosters for '+new Set(dailyMatchups.flatMap(g=>[g.home,g.away])).size+' teams…';
+  const teamIds=[...new Map(dailyMatchups.flatMap(g=>[{id:g.homeId,team:g.home},{id:g.awayId,team:g.away}]).filter(x=>x.id).map(x=>[x.id,x])).values()];
+  const rosterResults=await Promise.allSettled(teamIds.map(async t=>{
+   const rr=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/'+encodeURIComponent(t.id)+'/roster',{cache:'no-store'});
+   if(!rr.ok)throw new Error('Roster '+t.team+' HTTP '+rr.status);
+   const data=await rr.json();
+   const athletes=(data.athletes||[]).flatMap(a=>Array.isArray(a.items)?a.items:[a]);
+   return athletes.map(a=>({ID:String(a.id||''),Name:String(a.displayName||a.fullName||a.shortName||'').trim(),Team:t.team,Status:String(a.status?.name||a.status?.type||'').toUpperCase(),Position:String(a.position?.abbreviation||'').toUpperCase(),Opponent:'',Projection:0,Price:0,_roster:true}));
+  }));
+  dailyRosterPlayers=rosterResults.filter(x=>x.status==='fulfilled').flatMap(x=>x.value).filter(p=>p.Name);
   renderPlayerProps();
  }catch(err){
   msg.textContent='Could not load today’s live NBA schedule: '+(err.message||'unknown error')+'. Matchups will not be guessed from an old player list.';
@@ -310,7 +320,10 @@ function renderPlayerProps(){
   const row={mins,pts:num(field(g,['PTS','pts','Points'])),reb:num(field(g,['REB','reb','Rebounds'])),ast:num(field(g,['AST','ast','Assists'])),date:String(field(g,['GAME_DATE','Date','date'])||'')};
   (grouped[name]??=[]).push(row);
  }
- const pool=players.filter(p=>p.Name&&!unavailable(p)&&p.Team);
+ const slateTeams=new Set(dailyMatchups.flatMap(g=>[g.home,g.away]));
+ const existingByName=new Map(players.map(p=>[alias(p.Name),p]));
+ const rosterPool=dailyRosterPlayers.filter(p=>slateTeams.has(p.Team)).map(p=>({...p,...(existingByName.get(alias(p.Name))||{}),Name:p.Name,Team:p.Team,_roster:true}));
+ const pool=rosterPool.length?rosterPool:players.filter(p=>p.Name&&!unavailable(p)&&p.Team&&slateTeams.has(p.Team));
  const categories=[['pts','Points'],['reb','Rebounds'],['ast','Assists']];
  const cards=[];
  let matchedNames=new Set();
@@ -349,7 +362,7 @@ function renderPlayerProps(){
  const slateTeams=new Set(dailyMatchups.flatMap(g=>[g.home,g.away]));
  const csvTeams=new Set(pool.map(p=>p.Team));
  const overlap=[...slateTeams].filter(t=>csvTeams.has(t));
- $('propsmsg').textContent='Live ESPN schedule: '+dailyMatchups.length+' games for US date '+dailyScheduleDate+'. '+overlap.length+'/'+slateTeams.size+' scheduled teams found in the loaded player pool; '+matchedNames.size+' players matched to historical stats.'+(overlap.length<slateTeams.size?' Upload the current day’s Draftstars CSV to fill missing teams.':'');
+ $('propsmsg').textContent='Live ESPN schedule: '+dailyMatchups.length+' games for US date '+dailyScheduleDate+'. '+dailyRosterPlayers.length+' players loaded from current ESPN rosters; '+matchedNames.size+' matched to historical stats. '+(dailyRosterPlayers.length?'Predictions now use live team rosters, not the old Draftstars sample pool.':'Roster feed unavailable; retry schedule refresh.');
 }
 function render(){
  renderPlayerProps();
