@@ -62,20 +62,30 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 <p class="notice" id="zerowarn" style="display:none"></p>
 <div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Salary</th><th>Projection</th><th>Value/1k</th><th>Upside value/1k</th><th>Est. own%</th><th>Leverage</th><th>Status</th><th>Control</th></tr></thead><tbody id="pool"></tbody></table></div>
 </section>
-<section class="card wide"><h2>5. Projection comparison</h2>
+<section class="card wide"><h2>5. EDGE player performance predictions</h2>
+<p class="small">Independent player-stat estimates from saved NBA game logs, recent form and minutes trends. These are projected performances, not bookmaker-line comparisons. This module does not affect Draftstars lineup generation.</p>
+<div class="row"><div><button id="refreshprops" type="button">Refresh player predictions</button></div><div><p class="small" id="propsmsg">Waiting for saved historical game logs. Predictions update when game logs or the player pool changes.</p></div></div>
+<div class="row">
+ <div><h3>Top points projections</h3><div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Proj.</th><th>Range</th><th>Recent</th></tr></thead><tbody id="propPoints"></tbody></table></div></div>
+ <div><h3>Top rebounds projections</h3><div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Proj.</th><th>Range</th><th>Recent</th></tr></thead><tbody id="propRebounds"></tbody></table></div></div>
+ <div><h3>Top assists projections</h3><div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Proj.</th><th>Range</th><th>Recent</th></tr></thead><tbody id="propAssists"></tbody></table></div></div>
+</div>
+<p class="small">“Range” is an indicative historical band, not a guaranteed floor or ceiling. “Recent” compares the last five games with the player's retrieved sample average. Increased minutes are flagged as opportunity signals.</p>
+</section>
+<section class="card wide"><h2>6. Projection comparison</h2>
 <p class="small">Side-by-side audit only. This table does not change player projections or lineup generation. Independent values are the raw historical model before matchup, pace or game-environment adjustments.</p>
 <div class="row"><div><label>Show comparison rows</label><select id="comparefilter"><option value="all">All matched players</option><option value="large">Largest differences first</option></select></div><div><label>Minimum historical games</label><select id="comparegames"><option value="1">1 or more</option><option value="3">3 or more</option><option value="5" selected>5 or more</option><option value="10">10 or more</option></select></div></div>
 <p class="small" id="comparemsg">Upload a slate and retrieve historical game logs to populate this audit.</p>
 <div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Baseline</th><th>Independent</th><th>Difference</th><th>Avg mins</th><th>Games</th><th>Last 5 FP</th><th>Last 10 FP</th></tr></thead><tbody id="comparison"></tbody></table></div>
 </section>
-<section class="card wide"><h2>6. Ownership and leverage (optional)</h2>
+<section class="card wide"><h2>7. Ownership and leverage (optional)</h2>
 <p class="small">Enter estimated ownership percentages from a trusted source, one player per line: Player Name,Ownership%. Example: Nikola Jokic,32.5. This does not change projections. Standard tournament ranking remains active unless you explicitly select leverage ranking below. Missing ownership values are treated neutrally.</p>
 <textarea id="ownershipinput" rows="4" placeholder="Nikola Jokic,32.5&#10;Jayson Tatum,18"></textarea>
 <div class="row"><div><button id="autoownership" type="button">Auto-estimate ownership</button></div><div><button id="applyownership" type="button" class="secondary">Apply manual estimates</button></div><div><button id="clearownership" type="button" class="secondary">Clear ownership estimates</button></div></div>
 <p class="small">Auto estimates are modelled, not live contest ownership. The model distributes approximately 900% total ownership across a nine-player roster pool using projection, salary value, starter status and injury-replacement opportunity. Manual estimates override modelled values.</p>
 <p class="small" id="ownershipmsg">No ownership estimates loaded. The existing optimiser is unchanged.</p>
 </section>
-<section class="card"><h2>7. Generate lineups</h2>
+<section class="card"><h2>8. Generate lineups</h2>
 <p class="small">Roster template: 2 PG · 2 SG · 2 SF · 2 PF · 1 C. Players with multi-position eligibility can fill either slot.</p>
 <div style="margin:10px 0"><label>Lineup ranking</label><select id="rankingmode"><option value="standard">Standard tournament upside</option><option value="leverage">Advanced tournament leverage</option></select></div>
 <div class="row"><div><label>Maximum player exposure (%)</label><select id="maxexposure"><option value="25">25%</option><option value="30" selected>30%</option><option value="40">40%</option><option value="50">50%</option><option value="60">60%</option><option value="75">75%</option><option value="100">100%</option></select></div><div><label>Maximum players shared between lineups</label><select id="maxshared"><option value="5">5 (more variety)</option><option value="6" selected>6</option><option value="7">7 (balanced)</option><option value="8">8 (more overlap)</option></select></div></div>
@@ -261,7 +271,45 @@ function edgeMatchupValue(p){
  const own=teamPaceEstimate[String(p.Team||'').toUpperCase()],oppPace=teamPaceEstimate[opp];if(own&&oppPace&&own.games>=5&&oppPace.games>=5&&leaguePaceEstimate>0){const gamePace=((own.pace+oppPace.pace)/2)/leaguePaceEstimate-1;value*=Math.max(0.97,Math.min(1.03,1+gamePace*0.35));}
  return value;
 }
+function renderPlayerProps(){
+ const ids={PTS:'propPoints',REB:'propRebounds',AST:'propAssists'};
+ if(!gameLogs.length){Object.values(ids).forEach(id=>$(id).innerHTML='<tr><td colspan="5">No historical game logs saved yet. Retrieve recent NBA game logs in the Projection Model section first.</td></tr>');$('propsmsg').textContent='No saved game logs found.';return;}
+ const grouped={};
+ for(const g of gameLogs){
+  const name=alias(field(g,['PLAYER_NAME','Player','Name','player_name','name']));
+  if(!name)continue;
+  const mins=num(field(g,['MIN','Minutes','minutes']));
+  if(mins<=0)continue;
+  const row={mins,pts:num(field(g,['PTS','pts','Points'])),reb:num(field(g,['REB','reb','Rebounds'])),ast:num(field(g,['AST','ast','Assists'])),date:String(field(g,['GAME_DATE','Date','date'])||'')};
+  (grouped[name]??=[]).push(row);
+ }
+ const pool=players.filter(p=>p.Name&&!unavailable(p));
+ let matched=0;
+ const categories=[['PTS','Points','propPoints'],['REB','Rebounds','propRebounds'],['AST','Assists','propAssists']];
+ for(const [key,label,id] of categories){
+  const rows=[];
+  for(const p of pool){
+   const all=(grouped[alias(p.Name)]||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+   if(!all.length)continue;
+   matched++;
+   const recent=all.slice(0,5),medium=all.slice(0,10),avg=a=>a.reduce((v,x)=>v+x[key.toLowerCase()],0)/Math.max(1,a.length);
+   const sampleAvg=avg(all),last5=avg(recent),last10=avg(medium);
+   const sampleMins=all.reduce((v,x)=>v+x.mins,0)/all.length,recentMins=recent.reduce((v,x)=>v+x.mins,0)/recent.length;
+   const minutesFactor=Math.max(.80,Math.min(1.20,recentMins/Math.max(1,sampleMins)));
+   const projection=(.50*last5+.30*last10+.20*sampleAvg)*minutesFactor;
+   const vals=medium.map(x=>x[key.toLowerCase()]),mean=vals.reduce((a,b)=>a+b,0)/vals.length;
+   const sd=vals.length>1?Math.sqrt(vals.reduce((a,v)=>a+Math.pow(v-mean,2),0)/(vals.length-1)):0;
+   const recentText=recentMins>sampleMins*1.12?'Minutes rising':recentMins<sampleMins*.88?'Minutes down':'Stable minutes';
+   rows.push({p,projection,low:Math.max(0,projection-sd),high:projection+sd,last5,recentText,games:all.length});
+  }
+  rows.sort((a,b)=>b.projection-a.projection);
+  $(id).innerHTML=rows.slice(0,5).map(x=>'<tr><td>'+x.p.Name+(x.recentText==='Minutes rising'?' <span class="small">↑ opportunity</span>':'')+'</td><td>'+x.p.Team+'</td><td><b>'+x.projection.toFixed(1)+'</b></td><td>'+x.low.toFixed(1)+'–'+x.high.toFixed(1)+'</td><td>'+x.last5.toFixed(1)+'</td></tr>').join('')||'<tr><td colspan="5">No matched players with usable game logs.</td></tr>';
+ }
+ const uniqueMatched=new Set(pool.filter(p=>(grouped[alias(p.Name)]||[]).length).map(p=>alias(p.Name))).size;
+ $('propsmsg').textContent='Updated from '+gameLogs.length.toLocaleString()+' saved game-log rows. '+uniqueMatched+' available slate players matched to history. Top five are ranked separately in each stat category.';
+}
 function render(){
+ renderPlayerProps();
  const q=$('search').value.toLowerCase(),st=$('status').value;
  const list=players.filter(p=>(st==='all'||(st==='active'?eligible(p):p.Status==='ESTIMATED STARTER'))&&(`${p.Name} ${p.Team}`.toLowerCase().includes(q)));
  $('total').textContent=players.length;$('eligible').textContent=players.filter(eligible).length;$('games').textContent=new Set(players.map(p=>p.Team).filter(Boolean)).size;
@@ -470,6 +518,7 @@ $('historydata').addEventListener('click',async()=>{
  }catch(err){m.textContent='Could not retrieve game logs: '+(err.message||'unknown error')+'. Existing lineups are unchanged.';}
  finally{b.disabled=false;}
 });
+$('refreshprops').addEventListener('click',renderPlayerProps);
 $('logsfile').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('modelmsg').textContent=`Reading ${f.name}…`;try{gameLogs=parseCSV(await readTextFile(f));try{localStorage.setItem('nbaEdgeGameLogs',JSON.stringify(gameLogs));}catch(e){}calcLogs(gameLogs);updateAutoLineupResult();$('modelmsg').textContent=`Loaded ${gameLogs.length} game-log rows.`;render();}catch(err){$('modelmsg').textContent=err.message||'Could not read game logs CSV.';alert($('modelmsg').textContent);}});
 $('file').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;$('loadmsg').textContent=`Reading ${f.name}…`;try{const imported=parseCSV(await readTextFile(f));if(imported.length===0)throw new Error('No player rows found. Make sure this is the Draftstars Player CSV, not an Excel workbook or PDF.');players=imported;if(gameLogs.length)calcLogs(gameLogs);generated=[];$('lineups').innerHTML='';$('loadmsg').textContent=`Successfully loaded ${players.length} players from ${f.name}.`+(gameLogs.length?' Historical logs restored and matched to this slate.':'');render()}catch(err){$('loadmsg').textContent=err.message||'Could not read that CSV.';alert($('loadmsg').textContent);}});
 ['search','status','mode','comparefilter','comparegames'].forEach(id=>$(id).addEventListener('input',render));
