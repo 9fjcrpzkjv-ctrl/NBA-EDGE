@@ -65,12 +65,8 @@ table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,t
 <section class="card wide"><h2>5. EDGE player performance predictions</h2>
 <p class="small">Independent player-stat estimates from saved NBA game logs, recent form and minutes trends. These are projected performances, not bookmaker-line comparisons. This module does not affect Draftstars lineup generation.</p>
 <div class="row"><div><button id="refreshprops" type="button">Refresh player predictions</button></div><div><p class="small" id="propsmsg">Waiting for saved historical game logs. Predictions update when game logs or the player pool changes.</p></div></div>
-<div class="row">
- <div><h3>Top points projections</h3><div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Proj.</th><th>Range</th><th>Recent</th></tr></thead><tbody id="propPoints"></tbody></table></div></div>
- <div><h3>Top rebounds projections</h3><div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Proj.</th><th>Range</th><th>Recent</th></tr></thead><tbody id="propRebounds"></tbody></table></div></div>
- <div><h3>Top assists projections</h3><div class="tablewrap"><table><thead><tr><th>Player</th><th>Team</th><th>Proj.</th><th>Range</th><th>Recent</th></tr></thead><tbody id="propAssists"></tbody></table></div></div>
-</div>
-<p class="small">“Range” is an indicative historical band, not a guaranteed floor or ceiling. “Recent” compares the last five games with the player's retrieved sample average. Increased minutes are flagged as opportunity signals.</p>
+<div id="propMatchups"></div>
+<p class="small">Each matchup is analysed separately for the currently loaded daily slate. The tables show the leading projected players in that game for points, rebounds and assists. “Range” is an indicative historical band, not a guaranteed floor or ceiling. Increased minutes are flagged as opportunity signals.</p>
 </section>
 <section class="card wide"><h2>6. Projection comparison</h2>
 <p class="small">Side-by-side audit only. This table does not change player projections or lineup generation. Independent values are the raw historical model before matchup, pace or game-environment adjustments.</p>
@@ -272,8 +268,9 @@ function edgeMatchupValue(p){
  return value;
 }
 function renderPlayerProps(){
- const ids={PTS:'propPoints',REB:'propRebounds',AST:'propAssists'};
- if(!gameLogs.length){Object.values(ids).forEach(id=>$(id).innerHTML='<tr><td colspan="5">No historical game logs saved yet. Retrieve recent NBA game logs in the Projection Model section first.</td></tr>');$('propsmsg').textContent='No saved game logs found.';return;}
+ const host=$('propMatchups');
+ if(!host)return;
+ if(!gameLogs.length){host.innerHTML='<p class="notice">No historical game logs saved yet. Retrieve recent NBA game logs in the Projection Model section first.</p>';$('propsmsg').textContent='No saved game logs found.';return;}
  const grouped={};
  for(const g of gameLogs){
   const name=alias(field(g,['PLAYER_NAME','Player','Name','player_name','name']));
@@ -283,30 +280,50 @@ function renderPlayerProps(){
   const row={mins,pts:num(field(g,['PTS','pts','Points'])),reb:num(field(g,['REB','reb','Rebounds'])),ast:num(field(g,['AST','ast','Assists'])),date:String(field(g,['GAME_DATE','Date','date'])||'')};
   (grouped[name]??=[]).push(row);
  }
- const pool=players.filter(p=>p.Name&&!unavailable(p));
- let matched=0;
- const categories=[['PTS','Points','propPoints'],['REB','Rebounds','propRebounds'],['AST','Assists','propAssists']];
- for(const [key,label,id] of categories){
-  const rows=[];
-  for(const p of pool){
+ const pool=players.filter(p=>p.Name&&!unavailable(p)&&p.Team&&(p.Opponent||p.Opp));
+ const matchups={};
+ for(const p of pool){
+  const team=String(p.Team||'').toUpperCase(),opp=String(p.Opponent||p.Opp||'').toUpperCase();
+  if(!team||!opp||team===opp)continue;
+  const key=[team,opp].sort().join('|');
+  (matchups[key]??={teams:[...new Set([team,opp])],players:[]}).players.push(p);
+ }
+ const categories=[['pts','Points'],['reb','Rebounds'],['ast','Assists']];
+ const fmt=(rows,stat)=>rows.map(x=>'<tr><td>'+x.p.Name+(x.minutesUp?' <span class="small">↑ minutes</span>':'')+'</td><td><b>'+x.projection.toFixed(1)+'</b></td><td>'+x.low.toFixed(1)+'–'+x.high.toFixed(1)+'</td><td>'+x.last5.toFixed(1)+'</td></tr>').join('')||'<tr><td colspan="4">No matched player history for this matchup.</td></tr>';
+ const cards=[];
+ let matchupCount=0,matchedNames=new Set();
+ for(const [key,game] of Object.entries(matchups).sort((a,b)=>a[0].localeCompare(b[0]))){
+  const teams=game.teams.sort();
+  const candidates=[];
+  for(const p of game.players){
    const all=(grouped[alias(p.Name)]||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
    if(!all.length)continue;
-   matched++;
-   const recent=all.slice(0,5),medium=all.slice(0,10),avg=a=>a.reduce((v,x)=>v+x[key.toLowerCase()],0)/Math.max(1,a.length);
-   const sampleAvg=avg(all),last5=avg(recent),last10=avg(medium);
-   const sampleMins=all.reduce((v,x)=>v+x.mins,0)/all.length,recentMins=recent.reduce((v,x)=>v+x.mins,0)/recent.length;
+   matchedNames.add(alias(p.Name));
+   const recent=all.slice(0,5),medium=all.slice(0,10);
+   const avg=(a,k)=>a.reduce((v,x)=>v+x[k],0)/Math.max(1,a.length);
+   const sampleMins=avg(all,'mins'),recentMins=avg(recent,'mins');
    const minutesFactor=Math.max(.80,Math.min(1.20,recentMins/Math.max(1,sampleMins)));
-   const projection=(.50*last5+.30*last10+.20*sampleAvg)*minutesFactor;
-   const vals=medium.map(x=>x[key.toLowerCase()]),mean=vals.reduce((a,b)=>a+b,0)/vals.length;
-   const sd=vals.length>1?Math.sqrt(vals.reduce((a,v)=>a+Math.pow(v-mean,2),0)/(vals.length-1)):0;
-   const recentText=recentMins>sampleMins*1.12?'Minutes rising':recentMins<sampleMins*.88?'Minutes down':'Stable minutes';
-   rows.push({p,projection,low:Math.max(0,projection-sd),high:projection+sd,last5,recentText,games:all.length});
+   const minutesUp=recentMins>sampleMins*1.12;
+   const stats={};
+   for(const [stat] of categories){
+    const sampleAvg=avg(all,stat),last5=avg(recent,stat),last10=avg(medium,stat);
+    const projection=(.50*last5+.30*last10+.20*sampleAvg)*minutesFactor;
+    const vals=medium.map(x=>x[stat]),mean=avg(medium,stat);
+    const sd=vals.length>1?Math.sqrt(vals.reduce((a,v)=>a+Math.pow(v-mean,2),0)/(vals.length-1)):0;
+    stats[stat]={projection,low:Math.max(0,projection-sd),high:projection+sd,last5};
+   }
+   candidates.push({p,minutesUp,stats});
   }
-  rows.sort((a,b)=>b.projection-a.projection);
-  $(id).innerHTML=rows.slice(0,5).map(x=>'<tr><td>'+x.p.Name+(x.recentText==='Minutes rising'?' <span class="small">↑ opportunity</span>':'')+'</td><td>'+x.p.Team+'</td><td><b>'+x.projection.toFixed(1)+'</b></td><td>'+x.low.toFixed(1)+'–'+x.high.toFixed(1)+'</td><td>'+x.last5.toFixed(1)+'</td></tr>').join('')||'<tr><td colspan="5">No matched players with usable game logs.</td></tr>';
+  if(!game.players.length)continue;
+  matchupCount++;
+  const tables=categories.map(([stat,label])=>{
+   const ranked=candidates.map(x=>({p:x.p,minutesUp:x.minutesUp,...x.stats[stat]})).sort((a,b)=>b.projection-a.projection).slice(0,5);
+   return '<div><h4>'+label+'</h4><div class="tablewrap"><table><thead><tr><th>Player</th><th>Proj.</th><th>Range</th><th>Last 5</th></tr></thead><tbody>'+fmt(ranked,stat)+'</tbody></table></div></div>';
+  }).join('');
+  cards.push('<section class="card" style="margin:12px 0"><h3>'+teams[0]+' vs '+teams[1]+'</h3><p class="small">'+candidates.length+' players matched to historical stats'+(candidates.length<game.players.length?' · some players have no history yet':'')+'</p><div class="row">'+tables+'</div></section>');
  }
- const uniqueMatched=new Set(pool.filter(p=>(grouped[alias(p.Name)]||[]).length).map(p=>alias(p.Name))).size;
- $('propsmsg').textContent='Updated from '+gameLogs.length.toLocaleString()+' saved game-log rows. '+uniqueMatched+' available slate players matched to history. Top five are ranked separately in each stat category.';
+ host.innerHTML=cards.join('')||'<p class="notice">No valid team-versus-opponent matchups found. Upload the current day’s Draftstars player CSV to load that slate.</p>';
+ $('propsmsg').textContent=matchupCount+' matchups on the current loaded slate · '+matchedNames.size+' players matched to historical stats · predictions are recalculated separately for each game.';
 }
 function render(){
  renderPlayerProps();
