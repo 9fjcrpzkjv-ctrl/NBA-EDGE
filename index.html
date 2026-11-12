@@ -369,9 +369,9 @@ function renderPlayerProps(){
   cards.push('<section class="card" style="margin:12px 0"><h3>'+game.away+' @ '+game.home+'</h3><p class="small">'+game.status+(gameDate?' · Brisbane tip '+gameDate:'')+' · '+candidates.length+' players matched to history</p><div class="row">'+tables+'</div></section>');
  }
  host.innerHTML='<h3>NBA slate · '+dailyScheduleLabel+' (Australia) · '+dailyMatchups.length+' games</h3>'+cards.join('');
- const slateTeams=new Set(dailyMatchups.flatMap(g=>[g.home,g.away]));
+ const scheduleTeams=new Set(dailyMatchups.flatMap(g=>[g.home,g.away]));
  const csvTeams=new Set(pool.map(p=>p.Team));
- const overlap=[...slateTeams].filter(t=>csvTeams.has(t));
+ const overlap=[...scheduleTeams].filter(t=>csvTeams.has(t));
  $('propsmsg').textContent='Live ESPN schedule: '+dailyMatchups.length+' games for US date '+dailyScheduleDate+'. '+dailyRosterPlayers.length+' players loaded from current ESPN rosters; '+matchedNames.size+' matched to historical stats. '+(dailyRosterPlayers.length?'Predictions now use live team rosters, not the old Draftstars sample pool.':'Roster feed unavailable; retry schedule refresh.');
 }
 function render(){
