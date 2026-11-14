@@ -532,22 +532,25 @@ function generate(){
  let effectiveShared=requestedShared;
  for(const sharedLimit of sharedStages){
   $('maxshared').value=String(sharedLimit);
-  while(generated.length<n&&tries<n*8){
+  let missesAtStage=0;
+  const maxMissesPerStage=Math.max(24,n*8);
+  while(generated.length<n&&tries<n*24&&missesAtStage<maxMissesPerStage){
    tries++;
    const l=buildOne(tries,exposure,seenKeys);
-   if(!l)break;
+   if(!l){missesAtStage++;continue;}
+   missesAtStage=0;
    const key=l.players.map(p=>p.ID).sort().join('-');
    if(seenKeys.has(key))continue;
    l.key=key;seenKeys.add(key);generated.push(l);effectiveShared=sharedLimit;
    l.players.forEach(p=>{const id=String(p.ID);exposure.set(id,(exposure.get(id)||0)+1)});
   }
-  if(generated.length>=n||tries>=n*8)break;
+  if(generated.length>=n||tries>=n*24)break;
  }
  $('maxshared').value=String(requestedShared);
  generated.sort((a,b)=>b.rankScore-a.rankScore||b.score-a.score);
  if(generated.length){const date=$('snapshotdate')?.value||new Date().toLocaleDateString('en-CA');const top=generated[0];const saved={date,projection:top.score,players:top.players.map(p=>({name:p.Name,team:p.Team,projection:proj(p)})),savedAt:new Date().toISOString()};try{localStorage.setItem('nbaEdgeSavedLineup',JSON.stringify(saved));updateAutoLineupResult();}catch(e){$('resultmsg').textContent='Lineup generated, but could not save it for automatic scoring. Browser storage may be full.';}}
  const blocked=players.filter(unavailable).length,manual=excludedPlayers.size;
- $('genmsg').textContent=generated.length?`Generated ${generated.length} of ${n} requested lineups. ${effectiveShared>requestedShared?'Maximum shared players was progressively relaxed from '+requestedShared+' to '+effectiveShared+'. ':'Maximum shared players stayed at '+requestedShared+'. '}Maximum player exposure remained ${$('maxexposure')?.value||30}%. OUT-player exclusions and rotation-risk limits were not relaxed. Excluded ${blocked} questionable, doubtful or out players plus ${manual} manually excluded. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`No valid lineup found after ${tries} attempts. Eligible: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check each position has enough eligible players, salary cap and exposure limits.`;
+ $('genmsg').textContent=generated.length?`Generated ${generated.length} of ${n} requested lineups. ${effectiveShared>requestedShared?'Maximum shared players was progressively relaxed from '+requestedShared+' to '+effectiveShared+'. ':'Maximum shared players stayed at '+requestedShared+'. '}Maximum player exposure remained ${$('maxexposure')?.value||30}%. OUT-player exclusions and rotation-risk limits were not relaxed. Excluded ${blocked} questionable, doubtful or out players plus ${manual} manually excluded. Lineup 1 is the suggested candidate; verify all unconfirmed statuses before entry.`:`Could not complete the requested portfolio after ${tries} search attempts. Generated ${generated.length} lineups. Eligible: ${players.filter(p=>eligible(p)&&proj(p)!==null&&p.Price>0).length}. Check each position has enough eligible players, salary cap and exposure limits.`;
  const expMap=new Map();generated.forEach(l=>l.players.forEach(p=>{const id=String(p.ID),old=expMap.get(id);expMap.set(id,{player:p,name:p.Name,count:(old?.count||0)+1});}));
  const expRows=[...expMap.values()].sort((a,b)=>b.count-a.count);
  const riskRows=expRows.map(x=>{const e=x.player._edge;let level='LOW DATA',reason='Insufficient history',mins='—';if(e&&e.games>=3){mins=e.recentMinutes.toFixed(1);if(e.zeroRecent>=2){level='HIGH';reason=e.zeroRecent+' zero-minute games in last 5';}else if(e.zeroRecent===1){level='ELEVATED';reason='1 zero-minute game in last 5';}else if(e.recentMinutes<8){level='HIGH';reason='Low recent minutes';}else if(e.recentMinutes<12&&e.sampleMinutes>=18){level='ELEVATED';reason='Recent minutes below longer-term role';}else{level='LOW';reason='No major minutes warning';}}return {name:x.name,count:x.count,level,reason,mins};}).sort((a,b)=>a.level.localeCompare(b.level)||b.count-a.count);
